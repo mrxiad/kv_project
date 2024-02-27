@@ -1,14 +1,20 @@
 package kv
 
 import (
+	"io"
 	"kv/data"
 	"kv/index"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 )
 
 /*
-datafile --> IO操作
-index    --> 内存操作(可以操作数据)
+DB
+datafile:IO操作
+index:内存操作(可以操作数据)
 */
 type DB struct {
 	mu         *sync.RWMutex
@@ -16,6 +22,147 @@ type DB struct {
 	oldFiles   map[uint32]*data.DataFile // 旧的数据文件
 	options    *Options                  // 数据库配置
 	index      index.Indexer             // 内存索引
+	fileIds    []int                     //	文件id，之只可以在加载索引的时候使用，不可以在其他地方用
+}
+
+// Open 打开存储引擎实例
+func Open(options Options) (*DB, error) {
+	// 校验用户传入的配置项
+	if err := checkOptions(options); err != nil {
+		return nil, err
+	}
+
+	// 对目录进行校验，不存在就要创建
+	if _, err := os.Stat(options.DirPath); err != nil {
+		if os.IsNotExist(err) { //如果目录不存在
+			if err := os.MkdirAll(options.DirPath, os.ModePerm); err != nil {
+				return nil, err
+			}
+		} else { //如果目录存在，但是有其他错误
+			return nil, err
+		}
+	}
+
+	// 初始化数据库
+	db := &DB{
+		mu:       new(sync.RWMutex),
+		oldFiles: make(map[uint32]*data.DataFile),
+		options:  &options,
+		index:    index.NewIndexer(options.IndexType),
+	}
+
+	// 加载数据文件，用于更新oldFiles和activeFile
+	if err := db.loadDataFiles(); err != nil {
+		return nil, err
+	}
+
+	//	加载内存索引,用于更新index,方便下一次写入
+	if err := db.loadIndexFromDataFiles(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// checkOptions 判断是否配置合法
+func checkOptions(options Options) error {
+	if options.DirPath == "" {
+		return ErrDataFileNotFound
+	}
+	if options.DataFileSize <= 0 {
+		return ErrOptionsInvalid
+	}
+	return nil
+}
+
+// loadDataFiles 加载数据文件到内存中
+func (db *DB) loadDataFiles() error {
+	// 读取目录下的所有文件
+	files, err := os.ReadDir(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	var fileIds []int
+	// 遍历文件,找到以.data结尾的数据文件
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), data.DataFileSuffix) {
+			splitNames := strings.Split(file.Name(), ".")
+			fileId, err := strconv.Atoi(splitNames[0])
+			//数据目录被损坏了
+			if err != nil {
+				return err
+			}
+			fileIds = append(fileIds, fileId)
+		}
+	}
+	// 对文件id进行排序
+	sort.Ints(fileIds)
+	// 保存文件id
+	db.fileIds = fileIds
+
+	// 逐个打开数据文件,存储到dataFile中
+	for i, fileId := range fileIds {
+		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fileId))
+		if err != nil {
+			return err
+		}
+		if i == len(fileIds)-1 { //最后一个文件是活跃文件
+			db.activeFile = dataFile
+		} else { //其他文件是旧文件
+			db.oldFiles[uint32(fileId)] = dataFile
+		}
+	}
+	return nil
+}
+
+// loadIndexFromDataFiles 从数据文件中加载索引，所以数据文件必须顺序读取
+func (db *DB) loadIndexFromDataFiles() error {
+	if len(db.fileIds) == 0 {
+		return nil
+	}
+	// 遍历所有文件id，处理文件中的内容
+	for i, fId := range db.fileIds {
+		// 获取dataFile
+		var fileId = uint32(fId)
+		var dataFile *data.DataFile
+		if fileId == db.activeFile.FileId {
+			dataFile = db.activeFile
+		} else {
+			dataFile = db.oldFiles[fileId]
+		}
+
+		//对于这个dataFile，将内容一个一个读取出来
+		var offset int64 = 0
+		for {
+			logRecord, size, err := dataFile.ReadLogRecord(uint32(offset))
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+
+			// 构造内存索引并保存
+			logRecordPos := &data.LogRecordPos{
+				Fid:    fileId,
+				Offset: uint32(offset),
+			}
+
+			if logRecord.Type == data.LogRecordDeleted {
+				db.index.Delete(logRecord.Key)
+			} else {
+				db.index.Put(logRecord.Key, logRecordPos)
+			}
+
+			offset += size
+		}
+
+		// 更新最后一个活跃文件，方便下一次写入
+		if i == len(db.fileIds)-1 {
+			db.activeFile.WriteOff = offset
+		}
+	}
+	return nil
 }
 
 // Put 向数据库中存储key-value,key不可以为空
@@ -42,6 +189,7 @@ func (db *DB) Put(key []byte, value []byte) error {
 	if ok := db.index.Put(key, pos); ok != true {
 		return ErrIndexUpdateFailed
 	}
+
 	return nil
 }
 
@@ -74,7 +222,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	}
 
 	//此时找到了数据文件,需要读取数据
-	logRecord, err := dataFile.ReadLogRecord(logRecordPos.Offset)
+	logRecord, _, err := dataFile.ReadLogRecord(logRecordPos.Offset)
 	if err != nil {
 		return nil, err
 	}

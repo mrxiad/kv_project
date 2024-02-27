@@ -7,4 +7,5 @@ var (
 	ErrIndexUpdateFailed = errors.New("index update failed")
 	ErrKeyNotFound       = errors.New("key not found in database")
 	ErrDataFileNotFound  = errors.New("data file is not found")
+	ErrOptionsInvalid    = errors.New("options is invalid")
 )

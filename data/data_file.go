@@ -2,6 +2,10 @@ package data
 
 import "kv/fio"
 
+const (
+	DataFileSuffix = ".data"
+)
+
 // DataFile 用于执行IO操作，以及创建，保存文件相关
 type DataFile struct {
 	FileId    uint32        // 文件id
@@ -23,6 +27,6 @@ func (df *DataFile) Write(buf []byte) error {
 	return nil
 }
 
-func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, error) {
-	return nil, nil
+func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
+	return nil, 0, nil
 }

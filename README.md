@@ -115,3 +115,47 @@ type DB struct {
 - 每次写入到文件的内容为（key-value-type）
 - 这个版本每一次put，并不会直接`sync`，会先写到缓冲区里，这一步是IO操作
 
+
+
+## DB启动流程
+
+```go
+// Open 打开存储引擎实例
+func Open(options Options) (*DB, error) {
+	// 校验用户传入的配置项
+	if err := checkOptions(options); err != nil {
+		return nil, err
+	}
+
+	// 对目录进行校验，不存在就要创建
+	if _, err := os.Stat(options.DirPath); err != nil {
+		if os.IsNotExist(err) { //如果目录不存在
+			if err := os.MkdirAll(options.DirPath, os.ModePerm); err != nil {
+				return nil, err
+			}
+		} else { //如果目录存在，但是有其他错误
+			return nil, err
+		}
+	}
+
+	// 初始化数据库
+	db := &DB{
+		mu:       new(sync.RWMutex),
+		oldFiles: make(map[uint32]*data.DataFile),
+		options:  &options,
+		index:    index.NewIndexer(options.IndexType),
+	}
+
+	// 加载数据文件，用于更新oldFiles和activeFile字段
+	if err := db.loadDataFiles(); err != nil {
+		return nil, err
+	}
+
+	//	加载内存索引,用于更新index,方便下一次写入
+	if err := db.loadIndexFromDataFiles(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+```

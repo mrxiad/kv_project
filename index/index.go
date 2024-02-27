@@ -15,6 +15,22 @@ type Indexer interface {
 	Delete(key []byte) bool
 }
 
+type IndexType = int8
+
+const (
+	// BTreeIndex BTree 索引
+	BTreeIndex IndexType = iota
+)
+
+func NewIndexer(typ IndexType) Indexer {
+	switch typ {
+	case BTreeIndex:
+		return NewBTree()
+	default:
+		panic("unknown index type")
+	}
+}
+
 // Item :BTree 的元素
 type Item struct {
 	Key []byte
