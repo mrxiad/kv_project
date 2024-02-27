@@ -87,7 +87,7 @@ func (db *DB) loadDataFiles() error {
 	for _, file := range files {
 		if strings.HasSuffix(file.Name(), data.DataFileSuffix) {
 			splitNames := strings.Split(file.Name(), ".")
-			fileId, err := strconv.Atoi(splitNames[0])
+			fileId, err := strconv.Atoi(splitNames[0]) //文件ID
 			//数据目录被损坏了
 			if err != nil {
 				return err
@@ -193,6 +193,32 @@ func (db *DB) Put(key []byte, value []byte) error {
 	return nil
 }
 
+func (db *DB) Delete(key []byte) error {
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+
+	//在索引中查找key是否存在
+	if pos := db.index.Get(key); pos != nil {
+		return nil
+	}
+
+	//构造logRecord，标识其是被删除的
+	logRecord := &data.LogRecord{
+		Key:  key,
+		Type: data.LogRecordDeleted,
+	}
+
+	// 写入到数据文件中
+	_, err := db.appendLogRecord(logRecord)
+	if err != nil {
+		return err
+	}
+	//更新内存索引
+	db.index.Delete(key)
+	return nil
+}
+
 // Get  获取key的value
 func (db *DB) Get(key []byte) ([]byte, error) {
 	db.mu.RLock()
@@ -236,6 +262,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 }
 
 // appendLogRecord 追加LogRecord到数据文件中,返回内存索引，用于快速返回写入的数据的位置
+// 其中对于activeFile的WriteOff进行更新
 func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
