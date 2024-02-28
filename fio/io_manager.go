@@ -29,4 +29,14 @@ type IOManager interface {
 		关闭文件。调用此方法后，文件描述符被关闭，相关资源被释放。如果关闭成功，返回 nil；否则返回错误
 	*/
 	Close() error
+
+	/*
+		获取文件大小
+	*/
+	Size() (int64, error)
+}
+
+// NewIOManager 初始化IO方法
+func NewIOManager(fileName string) (IOManager, error) {
+	return NewFileIOManager(fileName)
 }

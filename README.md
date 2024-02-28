@@ -159,3 +159,68 @@ func Open(options Options) (*DB, error) {
 	return db, nil
 }
 ```
+
+
+
+
+
+## dataFile读取流程
+
+> 注意，每次读取只读取了1条记录
+
+```go
+func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
+	fileSize, err := df.IoManager.Size()
+	if err != nil {
+		return nil, 0, err
+	}
+	var headerByteSize int64 = MaxLogRecordSize
+
+	// 如果文件大小小于offset+headerByteSize，说明文件已经读取完毕
+	if fileSize < int64(offset)+headerByteSize {
+		headerByteSize = fileSize - int64(offset)
+	}
+
+	// 读取头部信息
+	headerByte, err := df.readNBytes(headerByteSize, int64(offset))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 解码头部信息
+	header, headerSize, _ := decodeLogRecordHeader(headerByte) //解析头部，获取头部信息和头部大小
+	if header == nil {                                         // 读取到文件末尾
+		return nil, 0, io.EOF
+	}
+	if header.KeySize == 0 || header.Crc == 0 {
+		return nil, 0, io.EOF
+	}
+
+	keySize, valueSize := int64(header.KeySize), int64(header.ValueSize) // 获取key和value的大小
+	var totalSize = headerSize + keySize + valueSize                     // 计算总大小
+
+	var logRecord *LogRecord
+	if keySize > 0 || valueSize > 0 {
+		kvBuf, err := df.readNBytes(keySize+valueSize, int64(offset+uint32(headerSize)))
+		if err != nil {
+			return nil, 0, err
+		}
+		logRecord = &LogRecord{
+			Key:   kvBuf[:keySize],
+			Value: kvBuf[keySize:],
+			Type:  header.Type,
+		}
+	}
+
+	// 校验crc
+	crc := getLogRecordSRC(logRecord, headerByte[crc32.Size:headerSize])
+	if crc != header.Crc {
+		return nil, 0, fmt.Errorf("crc校验失败")
+	}
+
+	return logRecord, totalSize, nil
+}
+```
+
+
+
