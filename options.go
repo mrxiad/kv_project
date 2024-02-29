@@ -8,3 +8,10 @@ type Options struct {
 	SyncWrites   bool            // 每次写入是否同步
 	IndexType    index.IndexType // 索引类型
 }
+
+var DefaultOptions = Options{
+	DirPath:      "./tempDir",
+	DataFileSize: 1 << 30, // 1G
+	SyncWrites:   false,
+	IndexType:    index.BTreeIndex,
+}

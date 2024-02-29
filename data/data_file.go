@@ -38,6 +38,7 @@ func (df *DataFile) Sync() error {
 	return df.IoManager.Sync()
 }
 
+// 注意，这个函数将偏移量改变了
 func (df *DataFile) Write(buf []byte) error {
 	n, err := df.IoManager.Write(buf)
 	if err != nil {
@@ -57,22 +58,22 @@ func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	var headerByteSize int64 = MaxLogRecordSize
+	var headerByteSize int64 = MaxLogRecordHeaderSize
 
 	// 如果文件大小小于offset+headerByteSize，说明文件已经读取完毕
 	if fileSize < int64(offset)+headerByteSize {
 		headerByteSize = fileSize - int64(offset)
 	}
 
-	// 读取头部信息
+	// 读取头部信息，这里可能会读多，但是不会影响，因为传递给解析的时候，只会解析前面的部分
 	headerByte, err := df.readNBytes(headerByteSize, int64(offset))
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// 解码头部信息
-	header, headerSize, _ := decodeLogRecordHeader(headerByte) //解析头部，获取头部信息和头部大小
-	if header == nil {                                         // 读取到文件末尾
+	header, headerSize := DecodeLogRecordHeader(headerByte) //解析头部，获取头部信息和头部大小
+	if header == nil {                                      // 读取到文件末尾
 		return nil, 0, io.EOF
 	}
 	if header.KeySize == 0 || header.Crc == 0 {
@@ -95,8 +96,8 @@ func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
 		}
 	}
 
-	// 校验crc
-	crc := getLogRecordSRC(logRecord, headerByte[crc32.Size:headerSize])
+	// 校验crc,使用的是header[4:]
+	crc := GetLogRecordCRC(logRecord, headerByte[crc32.Size:headerSize])
 	if crc != header.Crc {
 		return nil, 0, fmt.Errorf("crc校验失败")
 	}
@@ -112,9 +113,4 @@ func (df *DataFile) readNBytes(n int64, offset int64) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
-}
-
-// 解码日志记录头部信息
-func decodeLogRecordHeader(buf []byte) (*LogRecordHeader, int64, error) {
-	return nil, 0, nil
 }

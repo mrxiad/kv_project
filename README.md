@@ -117,6 +117,8 @@ type DB struct {
 
 
 
+
+
 ## DB启动流程
 
 ```go
@@ -224,3 +226,10 @@ func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
 
 
 
+
+
+## 编码与解析
+
+1. 编码的时候，crc最后计算，其中的key_size和value_size是变长的
+2. 解码的时候，需要先解析出头部，然后根据头部的key_size和value_size来获取key和value，而且**传入解码的字节数组只许比头部长**，不允许比头部短！！
+3. CRC的计算是通过`除了前四个字节（因为要存放crc）的所有内容计算的`，校验的参数，头部必须是刚刚好

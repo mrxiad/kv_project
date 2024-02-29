@@ -179,7 +179,7 @@ func (db *DB) Put(key []byte, value []byte) error {
 		Type:  data.LogRecordNormal,
 	}
 
-	// 追加LogRecord到数据文件中
+	// 追加LogRecord到数据文件中，此后已经变更offset
 	pos, err := db.appendLogRecord(logRecord)
 	if err != nil {
 		return err
@@ -199,7 +199,7 @@ func (db *DB) Delete(key []byte) error {
 	}
 
 	//在索引中查找key是否存在
-	if pos := db.index.Get(key); pos != nil {
+	if pos := db.index.Get(key); pos == nil {
 		return nil
 	}
 
@@ -215,7 +215,9 @@ func (db *DB) Delete(key []byte) error {
 		return err
 	}
 	//更新内存索引
-	db.index.Delete(key)
+	if ok := db.index.Delete(key); ok == false {
+		panic("索引delete失败")
+	}
 	return nil
 }
 
@@ -230,6 +232,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 
 	//找到内存索引信息
 	logRecordPos := db.index.Get(key)
+
 	//如果value不存在内存索引中，说明key不存在
 	if logRecordPos == nil {
 		return nil, ErrKeyNotFound
@@ -248,6 +251,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	}
 
 	//此时找到了数据文件,需要读取数据
+
 	logRecord, _, err := dataFile.ReadLogRecord(logRecordPos.Offset)
 	if err != nil {
 		return nil, err
@@ -294,6 +298,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 
 	//执行数据写入操作
 	writeOff := db.activeFile.WriteOff //当前文件的写入位置
+
 	if err := db.activeFile.Write(encodedLogRecord); err != nil {
 		return nil, err
 	}
@@ -308,10 +313,9 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 	//更新当前文件的写入位置
 	pos := &data.LogRecordPos{
 		Fid:    db.activeFile.FileId,
-		Offset: uint32(writeOff),
+		Offset: uint32(writeOff), //这个是写入数据之前的writeOff
 	}
 
-	db.activeFile.WriteOff += length //更新当前文件的写入位置，当作下一次写入的起始位置
 	return pos, nil
 }
 
@@ -329,4 +333,8 @@ func (db *DB) setActiveFile() error {
 	}
 	db.activeFile = dataFile
 	return nil
+}
+
+func (db *DB) Close() error {
+	return db.activeFile.Close()
 }
