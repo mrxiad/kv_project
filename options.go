@@ -15,3 +15,15 @@ var DefaultOptions = Options{
 	SyncWrites:   false,
 	IndexType:    index.BTreeIndex,
 }
+
+type IteratorOptions struct {
+	// 遍历前缀为指定值的 Key，默认为空
+	Prefix  []byte
+	Reverse bool
+}
+
+var DefaultIteratorOptions = IteratorOptions{
+	// 遍历前缀为指定值的 Key，默认为空
+	Prefix:  nil,
+	Reverse: false,
+}

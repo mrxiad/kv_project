@@ -233,3 +233,39 @@ func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
 1. 编码的时候，crc最后计算，其中的key_size和value_size是变长的
 2. 解码的时候，需要先解析出头部，然后根据头部的key_size和value_size来获取key和value，而且**传入解码的字节数组只许比头部长**，不允许比头部短！！
 3. CRC的计算是通过`除了前四个字节（因为要存放crc）的所有内容计算的`，校验的参数，头部必须是刚刚好
+
+
+
+## 锁部分
+
+项目中的锁只存在于`索引`和`存储引擎`中
+
+> 注意：底层方法不加锁，上层方法加锁
+
+### 索引BTree
+
+```go
+Delete()
+Iterator()
+Put()
+Size()
+// 但是Get方法没有用锁，因为BTree的读取是安全的？？
+```
+
+
+
+### 存储引擎DB
+
+> 存储引擎，每次存储数据的时候，都会调用索引BTree和文件IO，所以，这部分锁只需要加到文件IO上即可
+>
+> 注意防止死锁
+
+```go
+appendLogRecord()   Put操作调用了这个，所以Put不加锁
+Close()
+Fold()
+Get()
+Sync()
+Iterator -> Value()
+```
+

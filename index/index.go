@@ -13,6 +13,10 @@ type Indexer interface {
 	Get(key []byte) *data.LogRecordPos
 	// Delete 从索引中删除key对应的数据位置
 	Delete(key []byte) bool
+	// Size 返回索引的大小
+	Size() int
+	// Iterator 返回一个新的迭代器
+	Iterator(reverse bool) Iterator
 }
 
 type IndexType = int8
@@ -39,4 +43,15 @@ type Item struct {
 
 func (i *Item) Less(than btree.Item) bool {
 	return string(i.Key) < string(than.(*Item).Key)
+}
+
+type Iterator interface {
+	Rewind()                   //将迭代器指向最小的元素
+	Next()                     //将迭代器指向下一个元素
+	Prev()                     //将迭代器指向上一个元素
+	Seek(key []byte)           //将迭代器指向大于等于key的元素
+	Key() []byte               //返回当前元素的key
+	Value() *data.LogRecordPos //返回当前元素的value
+	Close()                    //关闭迭代器，清空资源
+	Valid() bool               //判断迭代器是否有效
 }

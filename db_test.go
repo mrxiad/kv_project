@@ -102,25 +102,63 @@ func TestDB_Get(t *testing.T) {
 	val4, err := db.Get(utils.GetTestKey(33))
 	t.Log(val4)
 
-	// 6.重启后，前面写入的数据都能拿到
-	//err = db.Close()
-	//assert.Nil(t, err)
-	//
-	//// 重启数据库
-	//db2, err := Open(opts)
-	//val6, err := db2.Get(utils.GetTestKey(11))
-	//assert.Nil(t, err)
-	//assert.NotNil(t, val6)
-	//assert.Equal(t, val1, val6)
-	//
-	//val7, err := db2.Get(utils.GetTestKey(22))
-	//assert.Nil(t, err)
-	//assert.NotNil(t, val7)
-	//assert.Equal(t, val3, val7)
-	//
-	//val8, err := db2.Get(utils.GetTestKey(33))
-	//assert.Equal(t, 0, len(val8))
-	//assert.Equal(t, ErrKeyNotFound, err)
-	//err = db2.Close()
-	//assert.Nil(t, err)
+	//6.重启后，前面写入的数据都能拿到
+	err = db.Close()
+	assert.Nil(t, err)
+
+	// 重启数据库
+	db2, err := Open(opts)
+	val6, err := db2.Get(utils.GetTestKey(11))
+	assert.Nil(t, err)
+	assert.NotNil(t, val6)
+	assert.Equal(t, val1, val6)
+
+	val7, err := db2.Get(utils.GetTestKey(22))
+	assert.Nil(t, err)
+	assert.NotNil(t, val7)
+	assert.Equal(t, val3, val7)
+
+	val8, err := db2.Get(utils.GetTestKey(33))
+	assert.Equal(t, 0, len(val8))
+	assert.Equal(t, ErrKeyNotFound, err)
+	err = db2.Close()
+	assert.Nil(t, err)
+}
+
+func TestDB_ListKeys(t *testing.T) {
+	opts := DefaultOptions
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, _ := Open(opts)
+	defer destroyDB(db)
+
+	keys := db.ListKeys()
+	assert.Equal(t, 0, len(keys))
+
+	_ = db.Put(utils.GetTestKey(1), utils.RandomValue(24))
+	_ = db.Put(utils.GetTestKey(2), utils.RandomValue(24))
+	keys = db.ListKeys()
+	assert.Equal(t, 2, len(keys))
+	for _, key := range keys {
+		t.Log(string(key))
+	}
+}
+
+func TestDB_Fold(t *testing.T) {
+	opts := DefaultOptions
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, _ := Open(opts)
+	defer destroyDB(db)
+
+	_ = db.Put(utils.GetTestKey(1), utils.RandomValue(24))
+	_ = db.Put(utils.GetTestKey(2), utils.RandomValue(24))
+	_ = db.Put(utils.GetTestKey(3), utils.RandomValue(24))
+
+	err := db.Fold(func(key, value []byte) bool {
+		t.Log(string(key), string(value))
+		if string(key) == "kv-key-000000001" {
+			return false
+		}
+		return true
+	})
+	assert.Nil(t, err)
 }

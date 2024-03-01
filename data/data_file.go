@@ -12,7 +12,7 @@ const (
 	DataFileSuffix = ".data"
 )
 
-// DataFile 用于执行IO操作，以及创建，保存文件相关
+// DataFile 通过IOManager执行IO操作，以及创建，保存文件相关
 type DataFile struct {
 	FileId    uint32        // 文件id
 	WriteOff  int64         // 文件写到了哪个位置

@@ -53,3 +53,41 @@ func TestBtree_Delete(t *testing.T) {
 	res = bt.Delete([]byte("name1"))
 	assert.False(t, res)
 }
+
+func TestBtree_Iterator(t *testing.T) {
+	btree := NewBTree()
+	bti := btree.Iterator(false)
+	assert.Equal(t, bti.Valid(), false)
+
+	// 测试一条数据
+	btree.Put([]byte("name1"), &data.LogRecordPos{Fid: 1, Offset: 1})
+	bti = btree.Iterator(false)
+	assert.Equal(t, bti.Valid(), true)
+	assert.Equal(t, bti.Key(), []byte("name1"))
+	assert.Equal(t, bti.Value(), &data.LogRecordPos{Fid: 1, Offset: 1})
+	t.Log(bti.Key(), bti.Value())
+	bti.Next()
+	assert.Equal(t, bti.Valid(), false)
+
+	//	测试多条数据
+	btree.Put([]byte("name2"), &data.LogRecordPos{Fid: 1, Offset: 2})
+	btree.Put([]byte("name3"), &data.LogRecordPos{Fid: 1, Offset: 3})
+	bti = btree.Iterator(false)
+
+	for bti.Rewind(); bti.Valid(); bti.Next() {
+		t.Log(bti.Key(), bti.Value())
+		assert.NotNil(t, bti.Key())
+		assert.NotNil(t, bti.Value())
+	}
+	bti = btree.Iterator(true)
+	for bti.Rewind(); bti.Valid(); bti.Next() {
+		t.Log(bti.Key(), bti.Value())
+		assert.NotNil(t, bti.Key())
+		assert.NotNil(t, bti.Value())
+	}
+
+	// 测试seek
+	bti = btree.Iterator(false)
+	bti.Seek([]byte("z"))
+	assert.Equal(t, bti.Valid(), false)
+}

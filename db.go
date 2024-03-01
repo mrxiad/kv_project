@@ -193,6 +193,7 @@ func (db *DB) Put(key []byte, value []byte) error {
 	return nil
 }
 
+// Delete 从删除key
 func (db *DB) Delete(key []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
@@ -222,6 +223,7 @@ func (db *DB) Delete(key []byte) error {
 }
 
 // Get  获取key的value
+// 先获取内存索引的pos，然后根据pos获取value
 func (db *DB) Get(key []byte) ([]byte, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -238,31 +240,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 
-	//根据文件id找到文件
-	var dataFile *data.DataFile
-	if logRecordPos.Fid == db.activeFile.FileId {
-		dataFile = db.activeFile
-	} else {
-		dataFile = db.oldFiles[logRecordPos.Fid]
-	}
-
-	if dataFile == nil {
-		return nil, ErrDataFileNotFound
-	}
-
-	//此时找到了数据文件,需要读取数据
-
-	logRecord, _, err := dataFile.ReadLogRecord(logRecordPos.Offset)
-	if err != nil {
-		return nil, err
-	}
-
-	//如果是被删除的数据
-	if logRecord.Type == data.LogRecordDeleted {
-		return nil, ErrKeyNotFound
-	}
-
-	return logRecord.Value, nil
+	return db.getValueByPosition(logRecordPos)
 }
 
 // appendLogRecord 追加LogRecord到数据文件中,返回内存索引，用于快速返回写入的数据的位置
@@ -336,5 +314,81 @@ func (db *DB) setActiveFile() error {
 }
 
 func (db *DB) Close() error {
-	return db.activeFile.Close()
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.activeFile == nil {
+		return nil
+	}
+	//关闭活跃文件
+	if err := db.activeFile.Close(); err != nil {
+		return err
+	}
+	//关闭旧文件
+	for _, dataFile := range db.oldFiles {
+		if err := dataFile.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Sync 同步活跃文件数据到磁盘
+func (db *DB) Sync() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.activeFile.Sync()
+}
+
+func (db *DB) ListKeys() [][]byte {
+	//找到迭代器
+	iterator := db.index.Iterator(false)
+	keys := make([][]byte, db.index.Size())
+	//遍历迭代器
+	i := 0
+	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+		keys[i] = iterator.Key()
+		i++
+	}
+	iterator.Close()
+	return keys
+}
+
+func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	iterator := db.index.Iterator(false) //正向迭代
+	defer iterator.Close()
+	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+		value, err := db.getValueByPosition(iterator.Value()) //根据pos获取value
+		if err != nil {
+			return err
+		}
+		if !fn(iterator.Key(), value) { //如果fn返回false，就停止遍历
+			break
+		}
+	}
+	return nil
+}
+
+// 根据pos获取value
+func (db *DB) getValueByPosition(pos *data.LogRecordPos) ([]byte, error) {
+	var dataFile *data.DataFile
+	if pos.Fid == db.activeFile.FileId {
+		dataFile = db.activeFile
+	} else {
+		dataFile = db.oldFiles[pos.Fid]
+	}
+	//如果dataFile为空，说明文件不存在
+	if dataFile == nil {
+		return nil, ErrDataFileNotFound
+	}
+	logRecord, _, err := dataFile.ReadLogRecord(pos.Offset)
+	if err != nil {
+		return nil, err
+	}
+	return logRecord.Value, nil
 }
