@@ -40,6 +40,12 @@ type LogRecordPos struct {
 	Offset uint32 // 文件偏移
 }
 
+// 暂存事务的结构
+type TransactionRecord struct {
+	LogRecord    *LogRecord
+	LogRecordPos *LogRecordPos
+}
+
 // EncodeLogRecord 对 LogRecord 进行编码，返回字节数组及长度
 // +-----------+------------+-------------+--------------+-----------+---------------+
 // / crc 校验值 /  type 类型  /  key size   /  value size  /    key    /     value     /

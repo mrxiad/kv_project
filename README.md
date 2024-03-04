@@ -269,3 +269,24 @@ Sync()
 Iterator -> Value()
 ```
 
+
+
+
+
+## 事务
+
+> 这个代码进行了修改
+
+```go
+func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error)
+//注意，这里面的logRecord的key是  “realKey+序列号”
+```
+
+
+
+>  事务类型，用到了db存储引擎，所以这个类是**上层**
+
+
+
+> commit 操作会生产seqNo，这个一定是递增的，因为seqNo是在加锁之后才会计算
+

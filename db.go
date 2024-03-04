@@ -23,6 +23,7 @@ type DB struct {
 	options    *Options                  // 数据库配置
 	index      index.Indexer             // 内存索引
 	fileIds    []int                     //	文件id，之只可以在加载索引的时候使用，不可以在其他地方用
+	seqNo      uint64                    // 用于生成唯一的序列号
 }
 
 // Open 打开存储引擎实例
@@ -120,6 +121,19 @@ func (db *DB) loadIndexFromDataFiles() error {
 	if len(db.fileIds) == 0 {
 		return nil
 	}
+	// 更新内存索引
+	updateIndex := func(record *data.LogRecord, pos *data.LogRecordPos) {
+		// 如果是删除操作，就从内存索引中删除
+		if record.Type == data.LogRecordDeleted {
+			db.index.Delete(record.Key)
+		} else {
+			db.index.Put(record.Key, pos)
+		}
+	}
+
+	//暂存事务数据
+	transactionRecords := make(map[uint64][]data.TransactionRecord)
+	var currentSeqNo uint64 = nonTranscationSeqNo //当前事务序列号
 	// 遍历所有文件id，处理文件中的内容
 	for i, fId := range db.fileIds {
 		// 获取dataFile
@@ -147,11 +161,35 @@ func (db *DB) loadIndexFromDataFiles() error {
 				Fid:    fileId,
 				Offset: uint32(offset),
 			}
-
-			if logRecord.Type == data.LogRecordDeleted {
-				db.index.Delete(logRecord.Key)
+			//获取序列号和真实的key
+			seqNo, realKey := parseLogRecordKey(logRecord.Key)
+			//如果不是事务标志，就更新到内存索引
+			if seqNo == nonTranscationSeqNo {
+				updateIndex(&data.LogRecord{
+					Key:   realKey,
+					Value: logRecord.Value,
+					Type:  logRecord.Type,
+				}, logRecordPos)
 			} else {
-				db.index.Put(logRecord.Key, logRecordPos)
+				//如果是事务完成的一个标志，就更新seqNo
+				if logRecord.Type == data.LogRecordTxnFinished {
+					for _, txnRecord := range transactionRecords[seqNo] {
+						updateIndex(txnRecord.LogRecord, txnRecord.LogRecordPos)
+					}
+					delete(transactionRecords, seqNo)
+				} else {
+					transactionRecords[seqNo] = append(transactionRecords[seqNo], data.TransactionRecord{
+						LogRecord: &data.LogRecord{
+							Key:   realKey,
+							Value: logRecord.Value,
+							Type:  logRecord.Type,
+						},
+						LogRecordPos: logRecordPos})
+				}
+			}
+			// 更新序列号
+			if seqNo > currentSeqNo {
+				currentSeqNo = seqNo
 			}
 
 			offset += size
@@ -162,6 +200,7 @@ func (db *DB) loadIndexFromDataFiles() error {
 			db.activeFile.WriteOff = offset
 		}
 	}
+	db.seqNo = currentSeqNo
 	return nil
 }
 
@@ -174,13 +213,13 @@ func (db *DB) Put(key []byte, value []byte) error {
 
 	// 构造LogRecord
 	logRecord := &data.LogRecord{
-		Key:   key,
+		Key:   logRecordKeyWithSeq(key, nonTranscationSeqNo),
 		Value: value,
 		Type:  data.LogRecordNormal,
 	}
 
 	// 追加LogRecord到数据文件中，此后已经变更offset
-	pos, err := db.appendLogRecord(logRecord)
+	pos, err := db.appendLogRecordWithLock(logRecord)
 	if err != nil {
 		return err
 	}
@@ -206,12 +245,12 @@ func (db *DB) Delete(key []byte) error {
 
 	//构造logRecord，标识其是被删除的
 	logRecord := &data.LogRecord{
-		Key:  key,
+		Key:  logRecordKeyWithSeq(key, nonTranscationSeqNo),
 		Type: data.LogRecordDeleted,
 	}
 
 	// 写入到数据文件中
-	_, err := db.appendLogRecord(logRecord)
+	_, err := db.appendLogRecordWithLock(logRecord)
 	if err != nil {
 		return err
 	}
@@ -245,10 +284,8 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 
 // appendLogRecord 追加LogRecord到数据文件中,返回内存索引，用于快速返回写入的数据的位置
 // 其中对于activeFile的WriteOff进行更新
+// 注意，key是带有序列号的
 func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
 	// 判断当前活跃文件是否存在，不存在的话初始化
 	if db.activeFile == nil {
 		if err := db.setActiveFile(); err != nil {
@@ -260,7 +297,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 	encodedLogRecord, length := data.EncodeLogRecord(logRecord)
 
 	// 准备写入数据
-	//如果当前文件的写入位置加上要写入的数据长度大于文件的最大长度，那么就需要切换文件
+	// 如果当前文件的写入位置加上要写入的数据长度大于文件的最大长度，那么就需要切换文件
 	if db.activeFile.WriteOff+length > db.options.DataFileSize {
 		//先持久化当前文件
 		if err := db.activeFile.Sync(); err != nil {
@@ -295,6 +332,12 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 	}
 
 	return pos, nil
+}
+
+func (db *DB) appendLogRecordWithLock(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.appendLogRecord(logRecord)
 }
 
 // 设置当前活跃数据文件
