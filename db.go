@@ -5,6 +5,7 @@ import (
 	"kv/data"
 	"kv/index"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,10 +21,11 @@ type DB struct {
 	mu         *sync.RWMutex
 	activeFile *data.DataFile            // 当前活跃的数据文件, 用于写
 	oldFiles   map[uint32]*data.DataFile // 旧的数据文件
-	options    *Options                  // 数据库配置
+	options    Options                   // 数据库配置
 	index      index.Indexer             // 内存索引
 	fileIds    []int                     //	文件id，之只可以在加载索引的时候使用，不可以在其他地方用
 	seqNo      uint64                    // 用于生成唯一的序列号
+	isMerging  bool                      // 是否正在合并
 }
 
 // Open 打开存储引擎实例
@@ -48,8 +50,18 @@ func Open(options Options) (*DB, error) {
 	db := &DB{
 		mu:       new(sync.RWMutex),
 		oldFiles: make(map[uint32]*data.DataFile),
-		options:  &options,
+		options:  options,
 		index:    index.NewIndexer(options.IndexType),
+	}
+
+	//加载merge数据目录
+	if err := db.loadMergeFiles(); err != nil {
+		return nil, err
+	}
+
+	//加载hint文件
+	if err := db.loadIndexFromHintFile(); err != nil {
+		return nil, err
 	}
 
 	// 加载数据文件，用于更新oldFiles和activeFile
@@ -121,6 +133,17 @@ func (db *DB) loadIndexFromDataFiles() error {
 	if len(db.fileIds) == 0 {
 		return nil
 	}
+	//查看是否发生过merge
+	hasMerge, nonMergeFileId := false, uint32(0)
+	mergeFinFileName := filepath.Join(db.options.DirPath, data.MergeFinishedFileName)
+	if _, err := os.Stat(mergeFinFileName); err == nil {
+		nonMergeFileId, err = db.getNonMergeFileId(mergeFinFileName)
+		if err != nil {
+			return err
+		}
+		hasMerge = true
+	}
+
 	// 更新内存索引
 	updateIndex := func(record *data.LogRecord, pos *data.LogRecordPos) {
 		// 如果是删除操作，就从内存索引中删除
@@ -138,6 +161,11 @@ func (db *DB) loadIndexFromDataFiles() error {
 	for i, fId := range db.fileIds {
 		// 获取dataFile
 		var fileId = uint32(fId)
+
+		// 如果发生过merge，就跳过旧文件
+		if hasMerge && fileId < nonMergeFileId {
+			continue
+		}
 		var dataFile *data.DataFile
 		if fileId == db.activeFile.FileId {
 			dataFile = db.activeFile

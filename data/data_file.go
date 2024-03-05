@@ -9,7 +9,9 @@ import (
 )
 
 const (
-	DataFileSuffix = ".data"
+	DataFileSuffix        = ".data"
+	HintFileName          = "hint-index"
+	MergeFinishedFileName = "merge-finished"
 )
 
 // DataFile 通过IOManager执行IO操作，以及创建，保存文件相关
@@ -22,6 +24,32 @@ type DataFile struct {
 // OpenDataFile  初始化数据文件
 func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, fmt.Sprintf("%09d", fileId)+DataFileSuffix)
+	return newDataFile(fileName, fileId)
+}
+
+// OpenHintFile 打开 Hint 索引文件
+func OpenHintFile(dirPath string) (*DataFile, error) {
+	fileName := filepath.Join(dirPath, HintFileName)
+	return newDataFile(fileName, 0)
+}
+
+// OpenMergeFinishedFile 打开标识 merge 完成的文件
+func OpenMergeFinishedFile(dirPath string) (*DataFile, error) {
+	fileName := filepath.Join(dirPath, MergeFinishedFileName)
+	return newDataFile(fileName, 0)
+}
+
+// WriteHintRecord 写入索引信息到 hint 文件中
+func (df *DataFile) WriteHintRecord(key []byte, pos *LogRecordPos) error {
+	record := &LogRecord{
+		Key:   key,
+		Value: EncodeLogRecordPos(pos),
+	}
+	encRecord, _ := EncodeLogRecord(record)
+	return df.Write(encRecord)
+}
+
+func newDataFile(fileName string, fileId uint32) (*DataFile, error) {
 	ioManager, err := fio.NewIOManager(fileName)
 	if err != nil {
 		return nil, err

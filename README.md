@@ -236,6 +236,65 @@ func (df *DataFile) ReadLogRecord(offset uint32) (*LogRecord, int64, error) {
 
 
 
+
+
+### 每种文件的存储内容格式
+
+
+
+> 需要保证key和value都是字节数组
+
+
+
+#### 普通数据文件（.data)
+
+```go
+// 构造LogRecord
+logRecord := &data.LogRecord{
+	Key:   logRecordKeyWithSeq(key, nonTranscationSeqNo),
+	Value: value,
+	Type:  data.LogRecordNormal,
+}
+
+//添加
+db.appendLogRecordWithLock(logRecord)
+
+//内涵
+EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) 
+```
+
+#### hint文件
+
+```go
+// WriteHintRecord 写入索引信息到 hint 文件中
+func (df *DataFile) WriteHintRecord(key []byte, pos *LogRecordPos) error {
+	record := &LogRecord{
+		Key:   key,
+		Value: EncodeLogRecordPos(pos),
+	}
+	encRecord, _ := EncodeLogRecord(record)
+	return df.Write(encRecord)
+}
+```
+
+#### merge标识结束文件
+
+```go
+//一条record，		value存储的是merge文件中，最大的文件id+1
+mergeFinRecord := &data.LogRecord{
+		Key:   []byte(mergeFinishedKye),
+		Value: []byte(strconv.Itoa(int(nonMergeFileId))),
+	}
+//编码
+encRecord, _ := data.EncodeLogRecord(mergeFinRecord)
+```
+
+
+
+
+
+
+
 ## 锁部分
 
 项目中的锁只存在于`索引`和`存储引擎`中
@@ -284,9 +343,39 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 
 
 
->  事务类型，用到了db存储引擎，所以这个类是**上层**
+1.  事务类型，用到了db存储引擎，所以这个类是**上层**
+2. commit 操作会生产seqNo，这个一定是递增的，因为seqNo是在加锁之后才会计算
+3. 事务是先写入到“日志中”，再更新内存索引，**因为索引的value是pos**
 
 
 
-> commit 操作会生产seqNo，这个一定是递增的，因为seqNo是在加锁之后才会计算
+
+
+## Merge流程
+
+
+
+### 原存储引擎
+
+1. 将当前活跃文件持久化，变成一个旧的文件，然后打开一个新的活跃文件。
+2. 然后对于所有旧的文件进行持久化（另外一个存储引擎进行操作）
+
+
+
+### 新存储引擎
+
+1. 新建一个目录`./tempDir-merge`(原来的目录是`./tempDir`)
+2. 存在的话，删除这个目录，然后创建这个目录
+3. 在新建目录下创建`hint文件，存储索引`，这里的索引是不带事务的。
+4. 初始化存储引擎（`mergeDB`），这里用到了open函数，但是open函数会用到新创建的目录，可能存在问题todo
+5. 遍历原来的数据文件，将与内存索引一致的写到新的data（数据日志）文件中，并且更新hint（内存索引）文件。
+6. 创建标识 merge 完成的文件，并写入”当前merge文件id的后一个id“
+
+
+
+### 总结：
+
+创建新的目录`/tempDir-merge`,新的文件`hint`和`merge`，以及`data`
+
+
 

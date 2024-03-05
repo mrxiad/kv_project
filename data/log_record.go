@@ -124,3 +124,31 @@ func GetLogRecordCRC(logRecord *LogRecord, header []byte) uint32 {
 	crc := crc32.ChecksumIEEE(buf)
 	return crc
 }
+
+func EncodeLogRecordPos(logRecordPos *LogRecordPos) []byte {
+	buf := make([]byte, binary.MaxVarintLen32+binary.MaxVarintLen32)
+	var index = 0
+	index += binary.PutVarint(buf[index:], int64(logRecordPos.Fid))
+	index += binary.PutVarint(buf[index:], int64(logRecordPos.Offset))
+	return buf
+}
+
+func DecodeLogRecordPos(buf []byte) *LogRecordPos {
+	if len(buf) <= 0 {
+		return nil
+	}
+	var index = 0
+	fid, n := binary.Varint(buf[index:])
+	if n <= 0 {
+		return nil
+	}
+	index += n
+	offset, m := binary.Varint(buf[index:])
+	if m <= 0 {
+		return nil
+	}
+	return &LogRecordPos{
+		Fid:    uint32(fid),
+		Offset: uint32(offset),
+	}
+}
