@@ -24,12 +24,20 @@ type IndexType = int8
 const (
 	// BTreeIndex BTree 索引
 	BTreeIndex IndexType = iota
+	// ARTIndex ART 索引
+	ARTIndex
+	// BPTreeIndex B+Tree 索引
+	BPTreeIndex
 )
 
-func NewIndexer(typ IndexType) Indexer {
+func NewIndexer(typ IndexType, dirPath string, sync bool) Indexer {
 	switch typ {
 	case BTreeIndex:
 		return NewBTree()
+	case ARTIndex:
+		return NewART()
+	case BPTreeIndex:
+		return NewBPlusTree(dirPath, sync)
 	default:
 		panic("unknown index type")
 	}
@@ -48,7 +56,6 @@ func (i *Item) Less(than btree.Item) bool {
 type Iterator interface {
 	Rewind()                   //将迭代器指向最小的元素
 	Next()                     //将迭代器指向下一个元素
-	Prev()                     //将迭代器指向上一个元素
 	Seek(key []byte)           //将迭代器指向大于等于key的元素
 	Key() []byte               //返回当前元素的key
 	Value() *data.LogRecordPos //返回当前元素的value

@@ -75,7 +75,7 @@ func (db *DB) Merge() error {
 	mergeOptions.DirPath = mergePath //设置目录
 	mergeOptions.SyncWrites = false
 
-	mergeDB, err := Open(mergeOptions)
+	mergeDB, err := Open(mergeOptions) //这里打开，会不会有问题？？因为这里的目录是mergePath
 	if err != nil {
 		return err
 	}
@@ -157,6 +157,8 @@ func (db *DB) getMergePath() string {
 // 加载 merge 数据目录
 func (db *DB) loadMergeFiles() error {
 	mergePath := db.getMergePath()
+
+	//merge目录不存在，直接返回
 	if _, err := os.Stat(mergePath); err != nil {
 		return nil
 	}
@@ -175,6 +177,9 @@ func (db *DB) loadMergeFiles() error {
 		if entry.Name() == data.MergeFinishedFileName {
 			mergeFinished = true
 			break
+		}
+		if entry.Name() == data.SeqNoFileName {
+			continue
 		}
 		mergeFileNames = append(mergeFileNames, entry.Name())
 	}
@@ -227,6 +232,7 @@ func (db *DB) getNonMergeFileId(mergePath string) (uint32, error) {
 	return uint32(nonMergeFileId), nil
 }
 
+// 加载索引文件,这个函数更新了index
 func (db *DB) loadIndexFromHintFile() error {
 	hintFileName := filepath.Join(db.options.DirPath, data.HintFileName)
 

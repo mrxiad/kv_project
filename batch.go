@@ -3,6 +3,7 @@ package kv
 import (
 	"encoding/binary"
 	"kv/data"
+	"kv/index"
 	"sync"
 	"sync/atomic"
 )
@@ -20,6 +21,10 @@ type WriteBatch struct {
 
 // NewWriteBatch 创建一个新的 WriteBatch
 func (db *DB) NewWriteBatch(opts WriteBatchOptions) *WriteBatch {
+	if db.options.IndexType == index.BPTreeIndex && !db.seqNoFileExists && !db.isInitial {
+		panic("cannot use write batch, seq no file not exists")
+	}
+
 	return &WriteBatch{
 		mu:            new(sync.Mutex),
 		db:            db,
