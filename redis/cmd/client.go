@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tidwall/redcon"
+	"log"
 	"strings"
 )
 
@@ -17,6 +18,8 @@ func newWrongNumberOfArgsError(cmd string) error {
 type cmdHandler func(cli *BitcaskClient, args [][]byte) (interface{}, error)
 
 var supportedCommands = map[string]cmdHandler{
+	"quit":  nil,
+	"ping":  nil,
 	"set":   set,
 	"get":   get,
 	"hset":  hset,
@@ -39,14 +42,17 @@ func execClientCommand(conn redcon.Conn, cmd redcon.Command) {
 		conn.WriteError("Err unsupported command: '" + command + "'") //不支持的命令
 		return
 	}
-
+	log.Println("exec command:", string(cmd.Raw)) //打印命令(RESP协议格式)
+	for _, arg := range cmd.Args {
+		log.Println("arg:", string(arg)) //打印参数
+	}
 	//获取客户端
 	client, _ := conn.Context().(*BitcaskClient)
 	switch command {
-	case "quit":
-		_ = conn.Close()
+	case "quit": //实际上用不到这条指令，因为redcon库会自动处理
+		_ = conn.Close() //关闭连接
 	case "ping":
-		conn.WriteString("PONG")
+		conn.WriteString("PONG") //返回PONG
 	default:
 		//TODO
 		res, err := cmdFunc(client, cmd.Args[1:]) //cmd.Args[1:]是除了命令之外的参数

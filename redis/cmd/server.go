@@ -8,13 +8,13 @@ import (
 	"sync"
 )
 
-const addr = "127.0.0.1:6380"
+const addr = "127.0.0.1:6379"
 
 // redis-server
 type BitcaskServer struct {
-	dbs    map[int]*bitcask_redis.RedisDataStructure
-	server *redcon.Server
-	mu     sync.RWMutex
+	dbs    map[int]*bitcask_redis.RedisDataStructure //数据库
+	server *redcon.Server                            //服务
+	mu     sync.RWMutex                              //读写锁
 }
 
 func main() {
@@ -28,19 +28,23 @@ func main() {
 	bitcaskServer := &BitcaskServer{
 		dbs: make(map[int]*bitcask_redis.RedisDataStructure),
 	}
-	bitcaskServer.dbs[0] = redisDataStructure
+	bitcaskServer.dbs[0] = redisDataStructure //默认使用第一个数据库
 
-	// 初始化一个 Redis 服务端
+	// 初始化一个 Redis 服务端(IP:端口,handler,accept,close)
 	bitcaskServer.server = redcon.NewServer(addr, execClientCommand, bitcaskServer.accept, bitcaskServer.close)
 	bitcaskServer.listen()
 }
 
+// server开启监听
 func (svr *BitcaskServer) listen() {
 	log.Println("bitcask server running, ready to accept connections")
-	_ = svr.server.ListenAndServe()
+	_ = svr.server.ListenAndServe() //启动server的监听
 }
 
+// 接收一个客户端连接
 func (svr *BitcaskServer) accept(conn redcon.Conn) bool {
+	log.Println("客户端连接:", conn.RemoteAddr())
+	// 创建一个客户端
 	cli := new(BitcaskClient)
 	svr.mu.Lock()
 	defer svr.mu.Unlock()
@@ -50,34 +54,7 @@ func (svr *BitcaskServer) accept(conn redcon.Conn) bool {
 	return true
 }
 
+// 客户端连接关闭
 func (svr *BitcaskServer) close(conn redcon.Conn, err error) {
-	for _, db := range svr.dbs {
-		_ = db.Close()
-	}
-	_ = svr.server.Close()
+	log.Println("客户端退出")
 }
-
-//import (
-//	"bufio"
-//	"fmt"
-//	"net"
-//)
-//
-//func main() {
-//	conn, err := net.Dial("tcp", "localhost:6379")
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	// 向 Redis 发送一个命令
-//	cmd := "set k-name-2 bitcask-kv-2\r\n"
-//	conn.Write([]byte(cmd))
-//
-//	// 解析 Redis 响应
-//	reader := bufio.NewReader(conn)
-//	res, err := reader.ReadString('\n')
-//	if err != nil {
-//		panic(err)
-//	}
-//	fmt.Println(res)
-//}

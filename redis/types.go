@@ -34,6 +34,7 @@ func NewRedisDataStructure(opts bitcask.Options) (*RedisDataStructure, error) {
 		return nil, err
 	}
 
+	//返回redis封装的db
 	return &RedisDataStructure{db: db}, nil
 }
 
