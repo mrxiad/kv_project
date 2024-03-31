@@ -7,152 +7,89 @@ import (
 )
 
 func TestEncodeLogRecord(t *testing.T) {
-
-	// key value 不为空
-	logRecord := &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte("value"),
+	// 正常情况
+	rec1 := &LogRecord{
+		Key:   []byte("name"),
+		Value: []byte("bitcask-go"),
 		Type:  LogRecordNormal,
 	}
-	/*
-		crc: 1354786746
-		index: 7
-		encodeByte:[186 103 192 80 0 6 10 107 101 121 118 97 108 117 101]
-	*/
-	//编码
-	encodeByte, size := EncodeLogRecord(logRecord)
-	assert.NotNil(t, encodeByte)
-	assert.Greater(t, size, int64(5))
-	//输出
-	t.Log(encodeByte, size)
+	res1, n1 := EncodeLogRecord(rec1)
+	assert.NotNil(t, res1)
+	assert.Greater(t, n1, int64(5))
 
-	//value 为空
-	logRecord = &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte(""),
-		Type:  LogRecordNormal,
+	// value 为空
+	rec2 := &LogRecord{
+		Key:  []byte("name"),
+		Type: LogRecordNormal,
 	}
-	/*
-		crc: 1263740600
-		index: 7
-		encodeByte:[184 38 83 75 0 6 0 107 101 121]
-	*/
-	encodeByte, size = EncodeLogRecord(logRecord)
-	assert.NotNil(t, encodeByte)
-	assert.Greater(t, size, int64(5))
-	//输出
-	t.Log(encodeByte, size)
+	res2, n2 := EncodeLogRecord(rec2)
+	assert.NotNil(t, res2)
+	assert.Greater(t, n2, int64(5))
 
-	//Type 为删除
-	logRecord = &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte("value"),
+	// 对 Deleted 情况的测试
+	rec3 := &LogRecord{
+		Key:   []byte("name"),
+		Value: []byte("bitcask-go"),
 		Type:  LogRecordDeleted,
 	}
-	/*
-		crc: 2437855354
-		index: 7
-		encodeByte:[122 184 78 145 1 6 10 107 101 121 118 97 108 117 101] 15
-	*/
-	encodeByte, size = EncodeLogRecord(logRecord)
-	assert.NotNil(t, encodeByte)
-	assert.Greater(t, size, int64(5))
-	//输出
-	t.Log(encodeByte, size)
+	res3, n3 := EncodeLogRecord(rec3)
+	assert.NotNil(t, res3)
+	assert.Greater(t, n3, int64(5))
 }
 
 func TestDecodeLogRecordHeader(t *testing.T) {
-	/*
-		crc: 1354786746
-		index: 7
-		encodeByte:[186 103 192 80 0 6 10 107 101 121 118 97 108 117 101]
-	*/
-	encodeByte := []byte{186, 103, 192, 80, 0, 6, 10, 107, 101, 121, 118, 97, 108, 117, 101}
-	header, headerSize := DecodeLogRecordHeader(encodeByte)
+	headerBuf1 := []byte{104, 82, 240, 150, 0, 8, 20}
+	h1, size1 := decodeLogRecordHeader(headerBuf1)
+	assert.NotNil(t, h1)
+	assert.Equal(t, int64(7), size1)
+	assert.Equal(t, uint32(2532332136), h1.crc)
+	assert.Equal(t, LogRecordNormal, h1.recordType)
+	assert.Equal(t, uint32(4), h1.keySize)
+	assert.Equal(t, uint32(10), h1.valueSize)
 
-	//检查crc，type，keySize，valueSize
-	assert.NotNil(t, header)
-	assert.Greater(t, headerSize, int64(5))
-	assert.Equal(t, header.Crc, uint32(1354786746))
-	assert.Equal(t, header.Type, LogRecordNormal)
-	assert.Equal(t, header.KeySize, uint32(3))
-	assert.Equal(t, header.ValueSize, uint32(5))
+	headerBuf2 := []byte{9, 252, 88, 14, 0, 8, 0}
+	h2, size2 := decodeLogRecordHeader(headerBuf2)
+	assert.NotNil(t, h2)
+	assert.Equal(t, int64(7), size2)
+	assert.Equal(t, uint32(240712713), h2.crc)
+	assert.Equal(t, LogRecordNormal, h2.recordType)
+	assert.Equal(t, uint32(4), h2.keySize)
+	assert.Equal(t, uint32(0), h2.valueSize)
 
-	/*
-		crc: 1263740600
-		index: 7
-		encodeByte:[184 38 83 75 0 6 0 107 101 121]
-	*/
-	encodeByte = []byte{184, 38, 83, 75, 0, 6, 0, 107, 101, 121}
-	header, headerSize = DecodeLogRecordHeader(encodeByte)
-
-	//检查crc，type，keySize，valueSize
-	assert.NotNil(t, header)
-	assert.Greater(t, headerSize, int64(5))
-	assert.Equal(t, header.Crc, uint32(1263740600))
-	assert.Equal(t, header.Type, LogRecordNormal)
-	assert.Equal(t, header.KeySize, uint32(3))
-	assert.Equal(t, header.ValueSize, uint32(0))
-
-	/*
-		crc: 2437855354
-		index: 7
-		encodeByte:[122 184 78 145 1 6 10 107 101 121 118 97 108 117 101]
-	*/
-	encodeByte = []byte{122, 184, 78, 145, 1, 6, 10, 107, 101, 121, 118, 97, 108, 117, 101}
-	header, headerSize = DecodeLogRecordHeader(encodeByte)
-
-	//检查crc，type，keySize，valueSize
-	assert.NotNil(t, header)
-	assert.Greater(t, headerSize, int64(5))
-	assert.Equal(t, header.Crc, uint32(2437855354))
-	assert.Equal(t, header.Type, LogRecordDeleted)
-	assert.Equal(t, header.KeySize, uint32(3))
-	assert.Equal(t, header.ValueSize, uint32(5))
-
+	headerBuf3 := []byte{43, 153, 86, 17, 1, 8, 20}
+	h3, size3 := decodeLogRecordHeader(headerBuf3)
+	assert.NotNil(t, h3)
+	assert.Equal(t, int64(7), size3)
+	assert.Equal(t, uint32(290887979), h3.crc)
+	assert.Equal(t, LogRecordDeleted, h3.recordType)
+	assert.Equal(t, uint32(4), h3.keySize)
+	assert.Equal(t, uint32(10), h3.valueSize)
 }
 
 func TestGetLogRecordCRC(t *testing.T) {
-	/*
-		crc: 1354786746
-		index: 7
-		encodeByte:[186 103 192 80 0 6 10 107 101 121 118 97 108 117 101]
-	*/
-	logRecord := &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte("value"),
+	rec1 := &LogRecord{
+		Key:   []byte("name"),
+		Value: []byte("bitcask-go"),
 		Type:  LogRecordNormal,
 	}
-	encodeByte := []byte{186, 103, 192, 80, 0, 6, 10, 107, 101, 121, 118, 97, 108, 117, 101}
-	crc := GetLogRecordCRC(logRecord, encodeByte[crc32.Size:7])
-	assert.Equal(t, crc, uint32(1354786746))
+	headerBuf1 := []byte{104, 82, 240, 150, 0, 8, 20}
+	crc1 := getLogRecordCRC(rec1, headerBuf1[crc32.Size:])
+	assert.Equal(t, uint32(2532332136), crc1)
 
-	/*
-		crc: 1263740600
-		index: 7
-		encodeByte:[184 38 83 75 0 6 0 107 101 121]
-	*/
-	logRecord = &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte(""),
-		Type:  LogRecordNormal,
+	rec2 := &LogRecord{
+		Key:  []byte("name"),
+		Type: LogRecordNormal,
 	}
-	encodeByte = []byte{184, 38, 83, 75, 0, 6, 0, 107, 101, 121}
-	crc = GetLogRecordCRC(logRecord, encodeByte[crc32.Size:7])
-	assert.Equal(t, crc, uint32(1263740600))
+	headerBuf2 := []byte{9, 252, 88, 14, 0, 8, 0}
+	crc2 := getLogRecordCRC(rec2, headerBuf2[crc32.Size:])
+	assert.Equal(t, uint32(240712713), crc2)
 
-	/*
-		crc: 2437855354
-		index: 7
-		encodeByte:[122 184 78 145 1 6 10 107 101 121 118 97 108 117 101]
-	*/
-	logRecord = &LogRecord{
-		Key:   []byte("key"),
-		Value: []byte("value"),
+	rec3 := &LogRecord{
+		Key:   []byte("name"),
+		Value: []byte("bitcask-go"),
 		Type:  LogRecordDeleted,
 	}
-	encodeByte = []byte{122, 184, 78, 145, 1, 6, 10, 107, 101, 121, 118, 97, 108, 117, 101}
-	crc = GetLogRecordCRC(logRecord, encodeByte[crc32.Size:7])
-	assert.Equal(t, crc, uint32(2437855354))
-
+	headerBuf3 := []byte{43, 153, 86, 17, 1, 8, 20}
+	crc3 := getLogRecordCRC(rec3, headerBuf3[crc32.Size:])
+	assert.Equal(t, uint32(290887979), crc3)
 }

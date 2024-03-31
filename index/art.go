@@ -1,9 +1,9 @@
 package index
 
 import (
+	"bitcask-go/data"
 	"bytes"
 	goart "github.com/plar/go-adaptive-radix-tree"
-	"kv/data"
 	"sort"
 	"sync"
 )
@@ -24,11 +24,14 @@ func NewART() *AdaptiveRadixTree {
 	}
 }
 
-func (art AdaptiveRadixTree) Put(key []byte, pos *data.LogRecordPos) bool {
+func (art AdaptiveRadixTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
 	art.lock.Lock()
-	_, ok := art.tree.Insert(key, pos)
+	oldValue, ok := art.tree.Insert(key, pos)
 	art.lock.Unlock()
-	return ok
+	if !ok {
+		return nil
+	}
+	return oldValue.(*data.LogRecordPos)
 }
 
 func (art AdaptiveRadixTree) Get(key []byte) *data.LogRecordPos {
@@ -42,11 +45,14 @@ func (art AdaptiveRadixTree) Get(key []byte) *data.LogRecordPos {
 	return val.(*data.LogRecordPos)
 }
 
-func (art AdaptiveRadixTree) Delete(key []byte) bool {
+func (art AdaptiveRadixTree) Delete(key []byte) (*data.LogRecordPos, bool) {
 	art.lock.Lock()
-	_, deleted := art.tree.Delete(key)
+	oldValue, deleted := art.tree.Delete(key)
 	art.lock.Unlock()
-	return deleted
+	if !deleted {
+		return nil, false
+	}
+	return oldValue.(*data.LogRecordPos), true
 }
 
 func (art AdaptiveRadixTree) Size() int {
@@ -73,11 +79,6 @@ type artIterator struct {
 	values    []*Item // key+位置索引信息
 }
 
-func (ai *artIterator) Prev() {
-	//TODO implement me
-	panic("implement me")
-}
-
 func newARTIterator(tree goart.Tree, reverse bool) *artIterator {
 	var idx int
 	if reverse {
@@ -86,7 +87,7 @@ func newARTIterator(tree goart.Tree, reverse bool) *artIterator {
 	values := make([]*Item, tree.Size())
 	saveValues := func(node goart.Node) bool {
 		item := &Item{
-			Key: node.Key(),
+			key: node.Key(),
 			pos: node.Value().(*data.LogRecordPos),
 		}
 		values[idx] = item
@@ -116,11 +117,11 @@ func (ai *artIterator) Rewind() {
 func (ai *artIterator) Seek(key []byte) {
 	if ai.reverse {
 		ai.currIndex = sort.Search(len(ai.values), func(i int) bool {
-			return bytes.Compare(ai.values[i].Key, key) <= 0
+			return bytes.Compare(ai.values[i].key, key) <= 0
 		})
 	} else {
 		ai.currIndex = sort.Search(len(ai.values), func(i int) bool {
-			return bytes.Compare(ai.values[i].Key, key) >= 0
+			return bytes.Compare(ai.values[i].key, key) >= 0
 		})
 	}
 }
@@ -137,7 +138,7 @@ func (ai *artIterator) Valid() bool {
 
 // Key 当前遍历位置的 Key 数据
 func (ai *artIterator) Key() []byte {
-	return ai.values[ai.currIndex].Key
+	return ai.values[ai.currIndex].key
 }
 
 // Value 当前遍历位置的 Value 数据

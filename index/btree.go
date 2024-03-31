@@ -1,21 +1,21 @@
 package index
 
 import (
+	"bitcask-go/data"
+	"bytes"
 	"github.com/google/btree"
-	"kv/data"
 	"sort"
 	"sync"
 )
 
-// BTree 索引实现
-/*
-	BTree 写操作需要加锁，读操作不需要加锁
-*/
+// BTree 索引 主要封装了google的btree库
+// https://github.com/google/btree
 type BTree struct {
 	tree *btree.BTree
 	lock *sync.RWMutex
 }
 
+// NewBTree 初始化 BTree 索引结构
 func NewBTree() *BTree {
 	return &BTree{
 		tree: btree.New(32),
@@ -23,113 +23,123 @@ func NewBTree() *BTree {
 	}
 }
 
-func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) bool {
-	it := Item{Key: key, pos: pos}
+func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
+	it := &Item{key: key, pos: pos}
 	bt.lock.Lock()
-	bt.tree.ReplaceOrInsert(&it)
+	oldItem := bt.tree.ReplaceOrInsert(it)
 	bt.lock.Unlock()
-	return true
+	if oldItem == nil {
+		return nil
+	}
+	return oldItem.(*Item).pos
 }
 
 func (bt *BTree) Get(key []byte) *data.LogRecordPos {
-	it := bt.tree.Get(&Item{Key: key})
-	if it == nil {
+	it := &Item{key: key}
+	btreeItem := bt.tree.Get(it)
+	if btreeItem == nil {
 		return nil
 	}
-	return it.(*Item).pos
+	return btreeItem.(*Item).pos
 }
 
-func (bt *BTree) Delete(key []byte) bool {
+func (bt *BTree) Delete(key []byte) (*data.LogRecordPos, bool) {
+	it := &Item{key: key}
 	bt.lock.Lock()
-	oldItem := bt.tree.Delete(&Item{Key: key}) // 删除成功返回删除的Item，否则返回nil
+	oldItem := bt.tree.Delete(it)
 	bt.lock.Unlock()
 	if oldItem == nil {
-		return false
+		return nil, false
 	}
-	return true
+	return oldItem.(*Item).pos, true
 }
 
 func (bt *BTree) Size() int {
-	bt.lock.RLock()
-	defer bt.lock.RUnlock()
 	return bt.tree.Len()
 }
+
+// Iterator 返回迭代器的一个方法
 func (bt *BTree) Iterator(reverse bool) Iterator {
 	if bt.tree == nil {
 		return nil
 	}
 	bt.lock.RLock()
 	defer bt.lock.RUnlock()
-	return bt.NewBTreeIterator(bt.tree, reverse)
+	return newBTreeIterator(bt.tree, reverse)
 }
 
-type BTreeIterator struct {
-	curIndex int     //当前元素的索引
-	reverse  bool    //是否是逆序
-	items    []*Item //元素数组
+func (bt *BTree) Close() error {
+	return nil
 }
 
-// NewBTreeIterator 创建一个BTree迭代器
-func (bt *BTree) NewBTreeIterator(tree *btree.BTree, reverse bool) *BTreeIterator {
-	var index int
-	values := make([]*Item, tree.Len()) //获取所有的元素
-	saveFunc := func(item btree.Item) bool {
-		values[index] = item.(*Item)
-		index++
+// BTree 索引迭代器
+type btreeIterator struct {
+	currIndex int     // 当前遍历位置
+	reverse   bool    // 是否是反向遍历
+	values    []*Item // key+位置索引信息
+}
+
+func newBTreeIterator(tree *btree.BTree, reverse bool) *btreeIterator {
+	var idx int
+	values := make([]*Item, tree.Len())
+
+	saveValues := func(it btree.Item) bool {
+		values[idx] = it.(*Item)
+		idx++
 		return true
 	}
+
 	if reverse {
-		tree.Descend(saveFunc)
+		tree.Descend(saveValues)
 	} else {
-		tree.Ascend(saveFunc)
+		tree.Ascend(saveValues)
 	}
-	return &BTreeIterator{
-		curIndex: 0,
-		reverse:  reverse,
-		items:    values,
+	return &btreeIterator{
+		currIndex: 0,
+		reverse:   reverse,
+		values:    values,
 	}
 }
 
-func (bti *BTreeIterator) Rewind() {
-	bti.curIndex = 0
+// Rewind 重新回到迭代器的起点，即第一个数据
+func (bti *btreeIterator) Rewind() {
+	bti.currIndex = 0
 }
 
-func (bti *BTreeIterator) Next() {
-	bti.curIndex++
-}
-
-func (bti *BTreeIterator) Prev() {
-	bti.curIndex--
-}
-
-func (bti *BTreeIterator) Seek(key []byte) {
+// Seek 根据传入的 key 查找第一个大于(或小于)等于的目标key，从这个key开始遍历
+func (bti *btreeIterator) Seek(key []byte) {
 	if bti.reverse {
-		bti.curIndex = sort.Search(len(bti.items), func(i int) bool {
-			return string(bti.items[i].Key) <= string(key)
+		bti.currIndex = sort.Search(len(bti.values), func(i int) bool {
+			return bytes.Compare(bti.values[i].key, key) <= 0
 		})
 	} else {
-		bti.curIndex = sort.Search(len(bti.items), func(i int) bool {
-			return string(bti.items[i].Key) >= string(key)
+		bti.currIndex = sort.Search(len(bti.values), func(i int) bool {
+			return bytes.Compare(bti.values[i].key, key) >= 0
 		})
 	}
 }
 
-func (bti *BTreeIterator) Key() []byte {
-	return bti.items[bti.curIndex].Key
+// Next 跳转到下一个key
+func (bti *btreeIterator) Next() {
+	bti.currIndex += 1
 }
 
-func (bti *BTreeIterator) Value() *data.LogRecordPos {
-	return bti.items[bti.curIndex].pos
+// Valid 当前遍历的位置的
+func (bti *btreeIterator) Valid() bool {
+	return bti.currIndex < len(bti.values)
 }
 
-func (bti *BTreeIterator) Close() {
-	bti.curIndex = -1
-	bti.items = nil
+// Key 当前遍历位置的 Key 数据
+func (bti *btreeIterator) Key() []byte {
+	return bti.values[bti.currIndex].key
 }
 
-func (bti *BTreeIterator) Valid() bool {
-	if bti.curIndex < 0 || bti.curIndex >= len(bti.items) {
-		return false
-	}
-	return true
+// Value 当前遍历位置的 Value 数据
+func (bti *btreeIterator) Value() *data.LogRecordPos {
+	return bti.values[bti.currIndex].pos
+}
+
+// Close 关闭迭代器，释放相应资源
+func (bti *btreeIterator) Close() {
+	bti.values = nil
 }

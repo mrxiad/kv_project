@@ -1,93 +1,109 @@
 package index
 
 import (
+	"bitcask-go/data"
 	"github.com/stretchr/testify/assert"
-	"kv/data"
 	"testing"
 )
 
-func TestBtree_Put(t *testing.T) {
+func TestBTree_Put(t *testing.T) {
 	bt := NewBTree()
-	pos := &data.LogRecordPos{
-		Fid:    1,
-		Offset: 100,
-	}
-	res := bt.Put([]byte("name"), pos)
 
-	assert.True(t, res)
+	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
+	assert.Nil(t, res1)
 
-	res = bt.Put(nil, &data.LogRecordPos{
-		Fid:    1,
-		Offset: 2,
-	})
+	res2 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 2})
+	assert.Nil(t, res2)
 
-	assert.True(t, res)
+	// 重复 Put 得到的是旧值
+	res3 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 3})
+	assert.NotNil(t, res3)
+	assert.Equal(t, res3, &data.LogRecordPos{Fid: 1, Offset: 2})
 }
 
-func TestBtree_Get(t *testing.T) {
+func TestBTree_Get(t *testing.T) {
 	bt := NewBTree()
-	pos := &data.LogRecordPos{
-		Fid:    1,
-		Offset: 2,
-	}
-	bt.Put([]byte("name"), pos)
-	res := bt.Get([]byte("name"))
-	t.Log(res)
-	assert.Equal(t, pos, res)
 
-	res = bt.Get([]byte("name1"))
-	assert.Nil(t, res)
+	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
+	assert.Nil(t, res1)
+
+	pos1 := bt.Get(nil)
+	assert.Equal(t, uint32(1), pos1.Fid)
+	assert.Equal(t, int64(100), pos1.Offset)
+
+	res2 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 2})
+	assert.Nil(t, res2)
+
+	res3 := bt.Put([]byte("a"), &data.LogRecordPos{Fid: 1, Offset: 3})
+	assert.NotNil(t, res3)
+	assert.Equal(t, res3, &data.LogRecordPos{Fid: 1, Offset: 2})
+
+	pos2 := bt.Get([]byte("a"))
+	assert.Equal(t, uint32(1), pos2.Fid)
+	assert.Equal(t, int64(3), pos2.Offset)
 }
 
-func TestBtree_Delete(t *testing.T) {
+func TestBTree_Delete(t *testing.T) {
 	bt := NewBTree()
-	pos := &data.LogRecordPos{
-		Fid:    1,
-		Offset: 2,
-	}
-	bt.Put([]byte("name"), pos)
+	res1 := bt.Put(nil, &data.LogRecordPos{Fid: 1, Offset: 100})
+	assert.Nil(t, res1)
+	res2, ok2 := bt.Delete(nil)
+	assert.NotNil(t, res2)
+	assert.True(t, ok2)
+	assert.Equal(t, uint32(1), res2.Fid)
+	assert.Equal(t, int64(100), res2.Offset)
 
-	res := bt.Delete([]byte("name"))
-	assert.True(t, res)
+	res3 := bt.Put([]byte("aaa"), &data.LogRecordPos{Fid: 22, Offset: 33})
+	assert.Nil(t, res3)
 
-	res = bt.Delete([]byte("name1"))
-	assert.False(t, res)
+	res4, ok4 := bt.Delete([]byte("aaa"))
+	assert.NotNil(t, res4)
+	assert.True(t, ok4)
+	assert.Equal(t, uint32(22), res4.Fid)
+	assert.Equal(t, int64(33), res4.Offset)
 }
 
-func TestBtree_Iterator(t *testing.T) {
-	btree := NewBTree()
-	bti := btree.Iterator(false)
-	assert.Equal(t, bti.Valid(), false)
+func TestBTree_Iterator(t *testing.T) {
+	bt := NewBTree()
+	// 1.BTree 为空的情况
+	iter1 := bt.Iterator(false)
+	assert.Equal(t, false, iter1.Valid())
 
-	// 测试一条数据
-	btree.Put([]byte("name1"), &data.LogRecordPos{Fid: 1, Offset: 1})
-	bti = btree.Iterator(false)
-	assert.Equal(t, bti.Valid(), true)
-	assert.Equal(t, bti.Key(), []byte("name1"))
-	assert.Equal(t, bti.Value(), &data.LogRecordPos{Fid: 1, Offset: 1})
-	t.Log(bti.Key(), bti.Value())
-	bti.Next()
-	assert.Equal(t, bti.Valid(), false)
+	// 2.BTree 有数据的情况
+	bt.Put([]byte("aaa"), &data.LogRecordPos{Fid: 31, Offset: 31})
+	iter2 := bt.Iterator(false)
+	assert.Equal(t, true, iter2.Valid())
+	assert.NotNil(t, iter2.Key())
+	assert.NotNil(t, iter2.Value())
+	iter2.Next()
+	assert.Equal(t, false, iter2.Valid())
 
-	//	测试多条数据
-	btree.Put([]byte("name2"), &data.LogRecordPos{Fid: 1, Offset: 2})
-	btree.Put([]byte("name3"), &data.LogRecordPos{Fid: 1, Offset: 3})
-	bti = btree.Iterator(false)
-
-	for bti.Rewind(); bti.Valid(); bti.Next() {
-		t.Log(bti.Key(), bti.Value())
-		assert.NotNil(t, bti.Key())
-		assert.NotNil(t, bti.Value())
-	}
-	bti = btree.Iterator(true)
-	for bti.Rewind(); bti.Valid(); bti.Next() {
-		t.Log(bti.Key(), bti.Value())
-		assert.NotNil(t, bti.Key())
-		assert.NotNil(t, bti.Value())
+	// 3.BTree 有多条数据的输出
+	bt.Put([]byte("acee"), &data.LogRecordPos{Fid: 31, Offset: 31})
+	bt.Put([]byte("bbcd"), &data.LogRecordPos{Fid: 33, Offset: 3221})
+	bt.Put([]byte("ccde"), &data.LogRecordPos{Fid: 34, Offset: 33})
+	bt.Put([]byte("eede"), &data.LogRecordPos{Fid: 34, Offset: 33})
+	iter3 := bt.Iterator(false)
+	assert.Equal(t, true, iter3.Valid())
+	for iter3.Rewind(); iter3.Valid(); iter3.Next() {
+		//t.Log("key=", string(iter3.Key()))
 	}
 
-	// 测试seek
-	bti = btree.Iterator(false)
-	bti.Seek([]byte("z"))
-	assert.Equal(t, bti.Valid(), false)
+	iter4 := bt.Iterator(true)
+	for iter4.Rewind(); iter4.Valid(); iter4.Next() {
+		//t.Log("key=", string(iter4.Key()))
+	}
+
+	// 4.测试 seek
+	iter5 := bt.Iterator(false)
+	for iter5.Seek([]byte("cc")); iter5.Valid(); iter5.Next() {
+		t.Log(string(iter5.Key()))
+	}
+
+	// 5.反向遍历的 seek
+	iter6 := bt.Iterator(true)
+	for iter6.Seek([]byte("ccf")); iter6.Valid(); iter6.Next() {
+		t.Log(string(iter6.Key()))
+	}
+
 }

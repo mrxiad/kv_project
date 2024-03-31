@@ -1,8 +1,8 @@
 package index
 
 import (
+	"bitcask-go/data"
 	bolt "go.etcd.io/bbolt"
-	"kv/data"
 	"path/filepath"
 )
 
@@ -21,7 +21,6 @@ func NewBPlusTree(dirPath string, syncWrites bool) *BPlusTree {
 	opts := bolt.DefaultOptions
 	opts.NoSync = !syncWrites
 
-	//不存在则创建
 	bptree, err := bolt.Open(filepath.Join(dirPath, bptreeIndexFileName), 0644, opts)
 	if err != nil {
 		panic("failed to open bptree")
@@ -40,14 +39,19 @@ func NewBPlusTree(dirPath string, syncWrites bool) *BPlusTree {
 	}
 }
 
-func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) bool {
+func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
+	var oldValue []byte
 	if err := bpt.tree.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
+		oldValue = bucket.Get(key)
 		return bucket.Put(key, data.EncodeLogRecordPos(pos))
 	}); err != nil {
 		panic("failed to put value in bptree")
 	}
-	return true
+	if len(oldValue) == 0 {
+		return nil
+	}
+	return data.DecodeLogRecordPos(oldValue)
 }
 
 func (bpt *BPlusTree) Get(key []byte) *data.LogRecordPos {
@@ -65,8 +69,7 @@ func (bpt *BPlusTree) Get(key []byte) *data.LogRecordPos {
 	return pos
 }
 
-// Delete 从索引中删除key对应的数据位置
-func (bpt *BPlusTree) Delete(key []byte) bool {
+func (bpt *BPlusTree) Delete(key []byte) (*data.LogRecordPos, bool) {
 	var oldValue []byte
 	if err := bpt.tree.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
@@ -77,7 +80,10 @@ func (bpt *BPlusTree) Delete(key []byte) bool {
 	}); err != nil {
 		panic("failed to delete key in bptree")
 	}
-	return true
+	if len(oldValue) == 0 {
+		return nil, false
+	}
+	return data.DecodeLogRecordPos(oldValue), true
 }
 
 func (bpt *BPlusTree) Size() int {
@@ -107,11 +113,6 @@ type bptreeIterator struct {
 	reverse   bool
 	currKey   []byte
 	currValue []byte
-}
-
-func (bpi *bptreeIterator) Prev() {
-	//TODO implement me
-	panic("implement me")
 }
 
 func newBptreeIterator(tree *bolt.DB, reverse bool) *bptreeIterator {

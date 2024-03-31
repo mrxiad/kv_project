@@ -1,8 +1,8 @@
-package kv
+package bitcask_go
 
 import (
+	"bitcask-go/index"
 	"bytes"
-	"kv/index"
 )
 
 // Iterator 迭代器
@@ -12,7 +12,6 @@ type Iterator struct {
 	options   IteratorOptions
 }
 
-// NewIterator 插入数据后，需要重新创建一个迭代器
 func (db *DB) NewIterator(opts IteratorOptions) *Iterator {
 	indexIter := db.index.Iterator(opts.Reverse)
 	return &Iterator{

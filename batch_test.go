@@ -1,136 +1,117 @@
-package kv
+package bitcask_go
 
 import (
+	"bitcask-go/utils"
 	"github.com/stretchr/testify/assert"
-	"strconv"
+	"os"
 	"testing"
-	"time"
 )
 
-func TestDB_NewWriteBatch(t *testing.T) {
+func TestDB_WriteBatch(t *testing.T) {
 	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-batch")
+	opts.DirPath = dir
 	db, err := Open(opts)
 	defer destroyDB(db)
 	assert.Nil(t, err)
 	assert.NotNil(t, db)
 
+	// 写数据之后 并没有提交
 	wb := db.NewWriteBatch(DefaultWriteBatchOptions)
-	err = wb.Put([]byte("key1"), []byte("value1"))
-	if err != nil {
-		return
-	}
+	err = wb.Put(utils.GetTestKey(1), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = wb.Delete(utils.GetTestKey(2))
+	assert.Nil(t, err)
 
-	_, err = db.Get([]byte("key1"))
-	assert.NotNil(t, err)
+	_, err = db.Get(utils.GetTestKey(1))
+	assert.Equal(t, ErrKeyNotFound, err)
 
-	//事务提交
+	// 正常提交掉
 	err = wb.Commit()
 	assert.Nil(t, err)
 
-	val, err := db.Get([]byte("key1"))
+	val, err := db.Get(utils.GetTestKey(1))
+	assert.NotNil(t, val)
 	assert.Nil(t, err)
-	t.Log(string(val))
+
+	// 删除提交的数据
+	wb2 := db.NewWriteBatch(DefaultWriteBatchOptions)
+	err = wb2.Delete(utils.GetTestKey(1))
+	assert.Nil(t, err)
+	err = wb2.Commit()
+	assert.Nil(t, err)
+
+	val2, err := db.Get(utils.GetTestKey(1))
+	t.Log(val2)
+	t.Log(err)
 }
 
-func TestWriteBatch_Put(t *testing.T) {
+func TestDB_WriteBatch2(t *testing.T) {
 	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-batch2")
+	opts.DirPath = dir
 	db, err := Open(opts)
 	defer destroyDB(db)
 	assert.Nil(t, err)
 	assert.NotNil(t, db)
 
+	err = db.Put(utils.GetTestKey(1), utils.RandomValue(10))
+	assert.Nil(t, err)
+
 	wb := db.NewWriteBatch(DefaultWriteBatchOptions)
-	err = wb.Put([]byte("key1"), []byte("value1"))
-	if err != nil {
-		return
-	}
+	err = wb.Put(utils.GetTestKey(2), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = wb.Delete(utils.GetTestKey(1))
+	assert.Nil(t, err)
 
-	_, err = db.Get([]byte("key1"))
-	assert.NotNil(t, err)
-
-	//事务提交
 	err = wb.Commit()
 	assert.Nil(t, err)
 
-	val, err := db.Get([]byte("key1"))
+	err = wb.Put(utils.GetTestKey(11), utils.RandomValue(10))
 	assert.Nil(t, err)
-	t.Log(string(val))
-}
-
-func TestWriteBatch_Delete(t *testing.T) {
-	opts := DefaultOptions
-	db, err := Open(opts)
-	defer destroyDB(db)
-	assert.Nil(t, err)
-	assert.NotNil(t, db)
-
-	wb := db.NewWriteBatch(DefaultWriteBatchOptions)
-	err = wb.Put([]byte("key1"), []byte("value1"))
-	if err != nil {
-		return
-	}
-
-	_, err = db.Get([]byte("key1"))
-	assert.NotNil(t, err)
-
-	//事务提交（第一次）
 	err = wb.Commit()
 	assert.Nil(t, err)
 
-	val, err := db.Get([]byte("key1"))
-	assert.Nil(t, err)
-	t.Log(string(val))
-
-	wb = db.NewWriteBatch(DefaultWriteBatchOptions)
-	err = wb.Delete([]byte("key1")) //删除	key1
-	if err != nil {
-		return
-	}
-
-	_, err = db.Get([]byte("key1")) //获取key1，此时应该找的到
-	assert.Nil(t, err)
-	//事务提交
-	err = wb.Commit() //（第二次）
-	//打印序列号
-	t.Log(db.seqNo)
-
-	assert.Nil(t, err)
-	val, err = db.Get([]byte("key1"))
-	assert.NotNil(t, err) //找不到对应的key
-
+	// 重启
 	err = db.Close()
+	assert.Nil(t, err)
 
-	//再次打开数据库
-	db, err = Open(opts)
-	defer destroyDB(db)
-	//再次获取key1，此时应该找不到
-	val, err = db.Get([]byte("key1"))
-	assert.NotNil(t, err) //找不到对应的key
+	db2, err := Open(opts)
+	assert.Nil(t, err)
 
+	_, err = db2.Get(utils.GetTestKey(1))
+	assert.Equal(t, ErrKeyNotFound, err)
+
+	// 校验 seqNo
+	assert.Equal(t, uint64(2), db.seqNo)
+
+	err = db2.Close()
+	assert.Nil(t, err)
 }
 
-func TestWriteBatch_Commit(t *testing.T) {
+func TestDB_WriteBatch3(t *testing.T) {
 	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-batch3")
+	//dir := "/tmp/bitcask-go-batch-3"
+	opts.DirPath = dir
 	db, err := Open(opts)
 	//defer destroyDB(db)
 	assert.Nil(t, err)
 	assert.NotNil(t, db)
+
 	keys := db.ListKeys()
+	t.Log(len(keys))
 
-	t.Log(keys)
-
-	wb := db.NewWriteBatch(DefaultWriteBatchOptions)
-	//写入很多数据
-	for i := 0; i < 500000; i++ {
-		err = wb.Put([]byte("key"+strconv.Itoa(i)), []byte("value"))
+	wbOpts := DefaultWriteBatchOptions
+	wbOpts.MaxBatchSize = 600000
+	wb := db.NewWriteBatch(wbOpts)
+	for i := 0; i < 50000; i++ {
+		err = wb.Put(utils.GetTestKey(i), utils.RandomValue(1024))
 		assert.Nil(t, err)
-		if i == 100000 {
-			t.Log("100000")
-		}
 	}
-	t.Log("put done")
-	time.Sleep(10 * time.Second)
-	//事务提交
 	err = wb.Commit()
+	assert.Nil(t, err)
+
+	err = db.Close()
 	assert.Nil(t, err)
 }

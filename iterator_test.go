@@ -1,84 +1,110 @@
-package kv
+package bitcask_go
 
 import (
+	"bitcask-go/utils"
 	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 )
 
 func TestDB_NewIterator(t *testing.T) {
-	options := DefaultOptions
-	db, err := Open(options)
-	if err != nil {
-		t.Error(err)
-	}
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-iterator-1")
+	opts.DirPath = dir
+	db, err := Open(opts)
 	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
 
 	iterator := db.NewIterator(DefaultIteratorOptions)
+	defer iterator.Close()
 	assert.NotNil(t, iterator)
 	assert.Equal(t, false, iterator.Valid())
 }
 
-func TestDB_NewIterator2(t *testing.T) {
-	options := DefaultOptions
-	db, err := Open(options)
-	if err != nil {
-		t.Error(err)
-	}
+func TestIterator_One_Value(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-iterator-2")
+	opts.DirPath = dir
+	db, err := Open(opts)
 	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
 
-	_ = db.Put([]byte("key1"), []byte("value1"))
+	err = db.Put(utils.GetTestKey(10), utils.GetTestKey(10))
+	assert.Nil(t, err)
+
 	iterator := db.NewIterator(DefaultIteratorOptions)
+	defer iterator.Close()
 	assert.NotNil(t, iterator)
 	assert.Equal(t, true, iterator.Valid())
-	t.Log("key: ", string(iterator.Key()))
+	assert.Equal(t, utils.GetTestKey(10), iterator.Key())
 	value, err := iterator.Value()
 	assert.Nil(t, err)
-	assert.Equal(t, "value1", string(value))
+	assert.Equal(t, utils.GetTestKey(10), value)
 }
 
-func TestDB_NewIterator3(t *testing.T) {
-	options := DefaultOptions
-	db, err := Open(options)
-	if err != nil {
-		t.Error(err)
-	}
+func TestIterator_Multi_Values(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-iterator-3")
+	opts.DirPath = dir
+	db, err := Open(opts)
 	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
 
-	_ = db.Put([]byte("key1"), []byte("value1"))
-	_ = db.Put([]byte("key2"), []byte("value2"))
-	_ = db.Put([]byte("k"), []byte("value3"))
-	_ = db.Put([]byte("key3"), []byte("value3"))
-	iterator := db.NewIterator(DefaultIteratorOptions)
+	err = db.Put([]byte("Alter"), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put([]byte("Alex"), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put([]byte("Bob"), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put([]byte("Candy"), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put([]byte("David"), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put([]byte("Expert"), utils.RandomValue(10))
+	assert.Nil(t, err)
 
-	//遍历所有数据
-	iterator.Rewind()
-	for iterator.Valid() {
-		t.Log("key: ", string(iterator.Key()))
-		value, err := iterator.Value()
+	// 正向迭代
+	iter1 := db.NewIterator(DefaultIteratorOptions)
+	defer iter1.Close()
+	for iter1.Rewind(); iter1.Valid(); iter1.Next() {
+		val, err := iter1.Value()
 		assert.Nil(t, err)
-		t.Log("value: ", string(value))
-		iterator.Next()
+		t.Log("key = ", string(iter1.Key()), "value = ", string(val))
 	}
 
-	//反向迭代
-	iterator = db.NewIterator(IteratorOptions{Reverse: true})
-	iterator.Rewind()
-	for iterator.Valid() {
-		t.Log("key: ", string(iterator.Key()))
-		value, err := iterator.Value()
-		assert.Nil(t, err)
-		t.Log("value: ", string(value))
-		iterator.Next()
+	iter1.Rewind()
+	for iter1.Seek([]byte("Bo")); iter1.Valid(); iter1.Next() {
+		assert.NotNil(t, iter1.Key())
+		t.Log("key = ", string(iter1.Key()))
 	}
 
-	//指定perfix
-	iterator = db.NewIterator(IteratorOptions{Prefix: []byte("key")})
-	iterator.Rewind()
-	for iterator.Valid() {
-		t.Log("key: ", string(iterator.Key()))
-		value, err := iterator.Value()
+	// 反向迭代
+	iterOpts1 := DefaultIteratorOptions
+	iterOpts1.Reverse = true
+	iter2 := db.NewIterator(iterOpts1)
+	defer iter2.Close()
+	for iter2.Rewind(); iter2.Valid(); iter2.Next() {
+		val, err := iter2.Value()
 		assert.Nil(t, err)
-		t.Log("value: ", string(value))
-		iterator.Next()
+		t.Log("key = ", string(iter2.Key()), "value = ", string(val))
+	}
+
+	iter2.Rewind()
+	for iter2.Seek([]byte("Dr")); iter2.Valid(); iter2.Next() {
+		assert.NotNil(t, iter2.Key())
+		t.Log("key = ", string(iter2.Key()))
+	}
+
+	// 指定了 prefix = "Alt" 只会打印 Alter
+	iterOpts2 := DefaultIteratorOptions
+	iterOpts2.Prefix = []byte("Alt")
+	iter3 := db.NewIterator(iterOpts2)
+	defer iter3.Close()
+	for iter3.Rewind(); iter3.Valid(); iter3.Next() {
+		assert.NotNil(t, iter3.Key())
+		t.Log("key = ", string(iter3.Key()))
 	}
 }

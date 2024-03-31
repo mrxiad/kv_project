@@ -8,15 +8,14 @@ import (
 type LogRecordType = byte
 
 const (
-	LogRecordNormal      LogRecordType = iota // 数据正常标记
-	LogRecordDeleted                          // 数据删除标记
-	LogRecordTxnFinished                      // 事务完成标记
+	LogRecordNormal LogRecordType = iota
+	LogRecordDeleted
+	LogRecordTxnFinished
 )
 
-// MaxLogRecordHeaderSize crc ,type ,keySize ,valueSize
-//
-//	4  ,  1  ,    5   ,    5
-const MaxLogRecordHeaderSize = binary.MaxVarintLen32*2 + 5
+// crc type keySize valueSize
+// 4 + 1 + 5 + 5 = 15
+const maxLogRecordHeaderSize = binary.MaxVarintLen32*2 + 5
 
 // LogRecord 写入到数据文件的记录
 // 之所以叫日志，是因为数据文件中的数据是追加写入的，类似日志的格式
@@ -26,24 +25,25 @@ type LogRecord struct {
 	Type  LogRecordType
 }
 
-type LogRecordHeader struct {
-	Crc       uint32        // crc校验
-	Type      LogRecordType // 记录类型
-	KeySize   uint32        // key大小
-	ValueSize uint32        // value大小
+// LogRecord 的头部信息
+type logRecordHeader struct {
+	crc        uint32        //crc校验值
+	recordType LogRecordType //标识 LogRecord 的类型
+	keySize    uint32        // key的长度
+	valueSize  uint32        //value的长度
 }
 
-// LogRecordPos 数据内存索引，主要描述了数据在磁盘上中的位置
-// 用于快速返回写入的数据的位置
+// LogRecordPos 数据内存索引，主要是描述上述数据在磁盘上的位置
 type LogRecordPos struct {
-	Fid    uint32 // 文件ID
-	Offset uint32 // 文件偏移
+	Fid    uint32 //文件 id 表示将数据存储的哪个文件当中
+	Offset int64  //偏移，表示将数据存储到了数据文件中的哪个位置
+	Size   uint32 // 标识数据在磁盘上的大小
 }
 
-// 暂存事务的结构
+// TransactionRecord 暂存的事务相关的数据
 type TransactionRecord struct {
-	LogRecord    *LogRecord
-	LogRecordPos *LogRecordPos
+	Record *LogRecord
+	Pos    *LogRecordPos
 }
 
 // EncodeLogRecord 对 LogRecord 进行编码，返回字节数组及长度
@@ -53,102 +53,91 @@ type TransactionRecord struct {
 //
 //	4字节 		 1字节	     变长（最大5）	 变长（最大5）       变长			变长
 func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
-	header := make([]byte, MaxLogRecordHeaderSize)
-	//crc最后算
-	//type
-	header[4] = byte(logRecord.Type)
-	var index int = 5
-	//key size
-	index += binary.PutVarint(header[index:], int64(uint64(len(logRecord.Key))))
-	//value size
-	index += binary.PutVarint(header[index:], int64(uint64(len(logRecord.Value))))
+	// 初始化一个 header 部分的字节数组
+	header := make([]byte, maxLogRecordHeaderSize)
 
-	//此时index位置应该放入key
-	var size = int64(index) + int64(len(logRecord.Key)+len(logRecord.Value))
+	// 第五个字节存储 Type
+	header[4] = logRecord.Type
+	var index = 5
+	// 5 字节之后。存储的是 key 和 value 的长度信息
+	// 使用变长类型，节省空间
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Key)))
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Value)))
 
-	encByte := make([]byte, size)
+	var size = index + len(logRecord.Key) + len(logRecord.Value)
+	encBytes := make([]byte, size)
 
-	//拷贝header部分
-	copy(encByte, header[:index])
+	// 将header部分的内容拷贝过来
+	copy(encBytes[:index], header[:index])
+	// 将 key 和 value 数据拷贝到字节数组中
+	copy(encBytes[index:], logRecord.Key)
+	copy(encBytes[index+len(logRecord.Key):], logRecord.Value)
 
-	//fmt.Println("index:", index)
-	//拷贝key和value
-	copy(encByte[index:], logRecord.Key)
-	copy(encByte[int64(index)+int64(len(logRecord.Key)):], logRecord.Value)
+	// 对整个 LogRecord 的数据进行 crc 校验
+	crc := crc32.ChecksumIEEE(encBytes[4:])
+	binary.LittleEndian.PutUint32(encBytes[:4], crc)
 
-	//crc
-	crc := crc32.ChecksumIEEE(encByte[4:])
-	//存放到encByte的前四个字节中,小端序
-	//fmt.Println(crc, index) //
-	binary.LittleEndian.PutUint32(encByte, crc)
-	return encByte, size
+	return encBytes, int64(size)
 }
 
-// DecodeLogRecordHeader 解码的时候，只解码头部信息，尽管传递整个数组，也只会解析前面的部分
-func DecodeLogRecordHeader(buf []byte) (*LogRecordHeader, int64) {
+// EncodeLogRecordPos 对位置信息进行编码
+func EncodeLogRecordPos(pos *LogRecordPos) []byte {
+	buf := make([]byte, binary.MaxVarintLen32*2+binary.MaxVarintLen64)
+	var index = 0
+	index += binary.PutVarint(buf[index:], int64(pos.Fid))
+	index += binary.PutVarint(buf[index:], pos.Offset)
+	index += binary.PutVarint(buf[index:], int64(pos.Size))
+	return buf[:index]
+}
+
+// DecodeLogRecordPos 解码 LogRecordPos
+func DecodeLogRecordPos(buf []byte) *LogRecordPos {
+	var index = 0
+	fileId, n := binary.Varint(buf[index:])
+	index += n
+	offset, n := binary.Varint(buf[index:])
+	index += n
+	size, _ := binary.Varint(buf[index:])
+	return &LogRecordPos{
+		Fid:    uint32(fileId),
+		Offset: offset,
+		Size:   uint32(size),
+	}
+}
+
+// 对字节数组中的 Header 信息进行解码
+func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
 	if len(buf) <= 4 {
 		return nil, 0
 	}
-	header := &LogRecordHeader{
-		Crc:  binary.LittleEndian.Uint32(buf[:4]),
-		Type: buf[4],
+
+	header := &logRecordHeader{
+		crc:        binary.LittleEndian.Uint32(buf[:4]),
+		recordType: buf[4],
 	}
+
 	var index = 5
-	//key size && value size 解析
+	// 取出实际的 key size
 	keySize, n := binary.Varint(buf[index:])
-	if n <= 0 {
-		return nil, 0
-	}
 	index += n
-	valueSize, m := binary.Varint(buf[index:])
-	if m <= 0 {
-		return nil, 0
-	}
-	index += m
-	header.KeySize = uint32(keySize)
-	header.ValueSize = uint32(valueSize)
+	header.keySize = uint32(keySize)
+
+	// 取出实际的 value size
+	valueSize, n := binary.Varint(buf[index:])
+	index += n
+	header.valueSize = uint32(valueSize)
 
 	return header, int64(index)
 }
 
-// GetLogRecordCRC 根据logRecord和头部的计算crc，header数组不包含crc,并且是正好的
-func GetLogRecordCRC(logRecord *LogRecord, header []byte) uint32 {
-	if logRecord == nil {
+func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
+	if lr == nil {
 		return 0
 	}
-	// 初始化长度为0的切片，容量足以存储header, key和value
-	buf := make([]byte, 0, len(header)+len(logRecord.Key)+len(logRecord.Value))
-	buf = append(buf, header...)
-	buf = append(buf, logRecord.Key...)
-	buf = append(buf, logRecord.Value...)
-	crc := crc32.ChecksumIEEE(buf)
+
+	crc := crc32.ChecksumIEEE(header[:])
+	crc = crc32.Update(crc, crc32.IEEETable, lr.Key)
+	crc = crc32.Update(crc, crc32.IEEETable, lr.Value)
+
 	return crc
-}
-
-func EncodeLogRecordPos(logRecordPos *LogRecordPos) []byte {
-	buf := make([]byte, binary.MaxVarintLen32+binary.MaxVarintLen32)
-	var index = 0
-	index += binary.PutVarint(buf[index:], int64(logRecordPos.Fid))
-	index += binary.PutVarint(buf[index:], int64(logRecordPos.Offset))
-	return buf
-}
-
-func DecodeLogRecordPos(buf []byte) *LogRecordPos {
-	if len(buf) <= 0 {
-		return nil
-	}
-	var index = 0
-	fid, n := binary.Varint(buf[index:])
-	if n <= 0 {
-		return nil
-	}
-	index += n
-	offset, m := binary.Varint(buf[index:])
-	if m <= 0 {
-		return nil
-	}
-	return &LogRecordPos{
-		Fid:    uint32(fid),
-		Offset: uint32(offset),
-	}
 }

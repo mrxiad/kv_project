@@ -1,64 +1,88 @@
 package index
 
 import (
+	"bitcask-go/data"
+	"bytes"
 	"github.com/google/btree"
-	"kv/data"
 )
 
-// Indexer 内存索引，用于根据key找到文件记录
+// Indexer 抽象索引接口 后续如果想接入其他的的数据结构 实现接口即可
 type Indexer interface {
-	// Put 向索引中存储key对应的数据位置
-	Put(key []byte, pos *data.LogRecordPos) bool
-	// Get 从索引中获取key对应的数据位置
+	// Put 向索引中存储 key 对应的数值位置信息
+	Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos
+
+	// Get 根据 key 取出对应的索引位置信息
 	Get(key []byte) *data.LogRecordPos
-	// Delete 从索引中删除key对应的数据位置
-	Delete(key []byte) bool
-	// Size 返回索引的大小
-	Size() int
-	// Iterator 返回一个新的迭代器
+
+	// Delete 根据 key 删除对应的索引位置信息
+	Delete(key []byte) (*data.LogRecordPos, bool)
+
+	// Iterator 索引迭代器
 	Iterator(reverse bool) Iterator
+
+	// Size 返回索引中存在了多少条数据
+	Size() int
+
+	// Close 关闭索引迭代器
+	Close() error
 }
 
 type IndexType = int8
 
 const (
-	// BTreeIndex BTree 索引
-	BTreeIndex IndexType = iota
-	// ARTIndex ART 索引
-	ARTIndex
-	// BPTreeIndex B+Tree 索引
-	BPTreeIndex
+	// Btree 索引
+	Btree IndexType = iota + 1
+
+	// ART 自适应基数树索引
+	ART
+
+	// BPTree B+树索引
+	BPTree
 )
 
+// NewIndexer 根据类型初始化索引
 func NewIndexer(typ IndexType, dirPath string, sync bool) Indexer {
 	switch typ {
-	case BTreeIndex:
+	case Btree:
 		return NewBTree()
-	case ARTIndex:
+	case ART:
 		return NewART()
-	case BPTreeIndex:
+	case BPTree:
 		return NewBPlusTree(dirPath, sync)
 	default:
-		panic("unknown index type")
+		panic("unsupported index type")
 	}
 }
 
-// Item :BTree 的元素
 type Item struct {
-	Key []byte
+	key []byte
 	pos *data.LogRecordPos
 }
 
-func (i *Item) Less(than btree.Item) bool {
-	return string(i.Key) < string(than.(*Item).Key)
+func (ai *Item) Less(bi btree.Item) bool {
+	return bytes.Compare(ai.key, bi.(*Item).key) == -1
 }
 
+// Iterator 通用的索引迭代器接口
 type Iterator interface {
-	Rewind()                   //将迭代器指向最小的元素
-	Next()                     //将迭代器指向下一个元素
-	Seek(key []byte)           //将迭代器指向大于等于key的元素
-	Key() []byte               //返回当前元素的key
-	Value() *data.LogRecordPos //返回当前元素的value
-	Close()                    //关闭迭代器，清空资源
-	Valid() bool               //判断迭代器是否有效
+	// Rewind 重新回到迭代器的起点，即第一个数据
+	Rewind()
+
+	// Seek 根据传入的 key 查找第一个大于(或小于)等于的目标key，从这个key开始遍历
+	Seek(key []byte)
+
+	// Next 跳转到下一个key
+	Next()
+
+	// Valid 当前遍历的位置的
+	Valid() bool
+
+	// Key 当前遍历位置的 Key 数据
+	Key() []byte
+
+	// Value 当前遍历位置的 Value 数据
+	Value() *data.LogRecordPos
+
+	// Close 关闭迭代器，释放相应资源
+	Close()
 }
