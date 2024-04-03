@@ -362,6 +362,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 
 
 
+
 ### 新存储引擎
 
 1. 新建一个目录`./tempDir-merge`(原来的目录是`./tempDir`)
@@ -370,12 +371,15 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 4. 初始化存储引擎（`mergeDB`），这里用到了open函数，但是open函数会用到新创建的目录，可能存在问题todo
 5. 遍历原来的数据文件，将与内存索引一致的写到新的data（数据日志）文件中，并且更新hint（内存索引）文件。
 6. 创建标识 merge 完成的文件，并写入”当前merge文件id的后一个id“
+7. 这里没有对事务id进行查看，因为如果事务不成功，则内存索引不会更新，那此时写入到磁盘的日志就不会被利用到，但是在更新内存的时候出问题，就崩了
 
 
 
 ### 总结：
 
 创建新的目录`/tempDir-merge`,新的文件`hint`和`merge`，以及`data`
+
+
 
 
 
