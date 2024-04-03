@@ -381,5 +381,10 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 
 
 
+## B+tree
+B+tree默认会将key存储到一个文件中，所以key/pos内存索引不会通过hint文件加载，直接从指定的文件中加载key，所以不需要加载hint和加载没有经过merge的key。
+
+
+
 
 
