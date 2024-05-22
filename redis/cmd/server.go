@@ -5,7 +5,9 @@ import (
 	bitcask_redis "bitcask-go/redis"
 	"github.com/tidwall/redcon"
 	"log"
+	"runtime"
 	"sync"
+	"time"
 )
 
 const addr = "127.0.0.1:6379"
@@ -17,7 +19,17 @@ type BitcaskServer struct {
 	mu     sync.RWMutex                              //读写锁
 }
 
+func logMemoryUsage() {
+	for {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		log.Printf("Alloc = %v MiB", m.Alloc/1024/1024)
+		time.Sleep(10 * time.Second) // 每10秒记录一次
+	}
+}
 func main() {
+	go logMemoryUsage()
+
 	// 打开 Redis 数据结构服务
 	redisDataStructure, err := bitcask_redis.NewRedisDataStructure(bitcask.DefaultOptions)
 	if err != nil {
@@ -43,7 +55,7 @@ func (svr *BitcaskServer) listen() {
 
 // 接收一个客户端连接
 func (svr *BitcaskServer) accept(conn redcon.Conn) bool {
-	log.Println("客户端连接:", conn.RemoteAddr())
+	//log.Println("客户端连接:", conn.RemoteAddr())
 	// 创建一个客户端
 	cli := new(BitcaskClient)
 	svr.mu.Lock()

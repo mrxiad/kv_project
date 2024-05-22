@@ -4,9 +4,9 @@ import (
 	bitcask "bitcask-go"
 	"bitcask-go/utils"
 	"errors"
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"math/rand"
-	"os"
 	"testing"
 	"time"
 )
@@ -14,11 +14,8 @@ import (
 var db *bitcask.DB
 
 func init() {
-	// 初始化用于基准测试的存储引擎
 	options := bitcask.DefaultOptions
-	dir, _ := os.MkdirTemp("", "bitcask-go-bench")
-	options.DirPath = dir
-
+	fmt.Println(options.DirPath)
 	var err error
 	db, err = bitcask.Open(options)
 	if err != nil {

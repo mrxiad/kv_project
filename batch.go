@@ -113,7 +113,7 @@ func (wb *WriteBatch) Commit() error {
 	}
 	if _, err := wb.db.appendLogRecord(finishedRecord); err != nil {
 		return err
-	}
+	} //添加一条记录标识事务完成
 
 	// 根据配置去进行持久化
 	if wb.options.SyncWrites && wb.db.activeFile != nil {
@@ -122,7 +122,7 @@ func (wb *WriteBatch) Commit() error {
 		}
 	}
 
-	// 更新对应的内存索引
+	// 更新对应的内存索引(更新前保证数据写入日志文件成功)
 	for _, record := range wb.pendingWrites {
 		pos := positions[string(record.Key)]
 		var oldPos *data.LogRecordPos

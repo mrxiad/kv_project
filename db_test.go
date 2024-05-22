@@ -11,7 +11,7 @@ import (
 // 测试完成之后销毁 DB 数据目录
 func destroyDB(db *DB) {
 	_ = db.Close()
-	_ = os.RemoveAll(db.options.DirPath)
+	//_ = os.RemoveAll(db.options.DirPath)
 }
 
 func TestOpen(t *testing.T) {
@@ -27,8 +27,6 @@ func TestOpen(t *testing.T) {
 
 func TestDB_Put(t *testing.T) {
 	opts := DefaultOptions
-	dir, _ := os.MkdirTemp("", "bitcask-go-put")
-	opts.DirPath = dir
 	opts.DataFileSize = 64 * 1024 * 1024
 	db, err := Open(opts)
 	defer destroyDB(db)

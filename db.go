@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/gofrs/flock"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -68,7 +67,7 @@ func Open(options Options) (*DB, error) {
 	fileLock := flock.New(filepath.Join(options.DirPath, fileLockName)) //创建文件
 	hold, err := fileLock.TryLock()                                     //尝试上锁
 
-	log.Println(hold)
+	//log.Println(hold)
 	if err != nil {
 		return nil, err
 	}
@@ -98,17 +97,17 @@ func Open(options Options) (*DB, error) {
 		fileLock:   fileLock,
 	}
 
-	// 加载 merge 数据目录
+	// 加载 merge 数据目录，替换掉本目录下的旧数据文件
 	if err := db.loadMergeFiles(); err != nil {
 		return nil, err
 	}
 
-	// 读取数据文件
+	// 读取数据文件，加载到db中，处理activeFile和oldfile
 	if err := db.loadDataFile(); err != nil {
 		return nil, err
 	}
 
-	// B+ 树索引不需要从数据文件中加载索引
+	// B+ 树索引不需要从数据文件中加载索引,其他的需要加载索引
 	if options.IndexType != BPlusTree {
 		// 从 hint 索引文件中加载索引
 		if err := db.loadIndexFromHintFile(); err != nil {
@@ -162,7 +161,7 @@ func (db *DB) Close() error {
 		return err
 	}
 
-	// 保存当前事务序列号4w
+	// 保存当前事务序列号
 	seqNoFile, err := data.OpenSeqNoFIle(db.options.DirPath)
 	if err != nil {
 		return err
@@ -492,7 +491,7 @@ func (db *DB) loadDataFile() error {
 	for i, fid := range fileIds {
 		ioType := fio.StandardFIO
 		if db.options.MMapAtStartup {
-			ioType = fio.MemoryMap
+			ioType = fio.MemoryMap //内存映射，提高读取速度
 		}
 		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fid), ioType)
 		if err != nil {
@@ -574,16 +573,15 @@ func (db *DB) loadIndexFromDataFile() error {
 
 			// 解析 Key，拿到事务序列号
 			realKey, seqNo := parseLogRecordKey(logRecord.Key)
-			if seqNo == nonTransactionSeqNo {
+			if seqNo == nonTransactionSeqNo { // 非事务数据
 				updateIndex(realKey, logRecord.Type, logRecordPos)
 			} else {
-				// 事务完成，对应的 seq no 的数据可以更新到内存索引中
-				if logRecord.Type == data.LogRecordTxnFinished {
+				if logRecord.Type == data.LogRecordTxnFinished { // 事务完成，对应的 seq no 的数据可以更新到内存索引中
 					for _, txnRecord := range transactionsRecords[seqNo] {
 						updateIndex(txnRecord.Record.Key, txnRecord.Record.Type, txnRecord.Pos)
 					}
-					delete(transactionsRecords, seqNo)
-				} else {
+					delete(transactionsRecords, seqNo) //删除事务记录
+				} else { // 事务数据，暂存
 					logRecord.Key = realKey
 					transactionsRecords[seqNo] = append(transactionsRecords[seqNo], &data.TransactionRecord{
 						Record: logRecord,
@@ -599,6 +597,7 @@ func (db *DB) loadIndexFromDataFile() error {
 			// 递增 offset， 下一次直接从新的位置读取
 			offset += size
 		}
+		// 更新活跃文件的写入位置，方便下次写入
 		if i == len(db.fileIds)-1 {
 			db.activeFile.WriteOff = offset
 		}

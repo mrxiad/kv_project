@@ -59,7 +59,7 @@ var DefaultOptions = Options{
 	DataFileSize:       256 * 1024 * 1024, // 256MB
 	SyncWrites:         false,
 	BytesPerSync:       0,
-	IndexType:          Btree,
+	IndexType:          ART,
 	MMapAtStartup:      true,
 	DataFileMergeRatio: 0.5,
 }
