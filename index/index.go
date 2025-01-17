@@ -3,10 +3,12 @@ package index
 import (
 	"bitcask-go/data"
 	"bytes"
+
 	"github.com/google/btree"
 )
 
 // Indexer 抽象索引接口 后续如果想接入其他的的数据结构 实现接口即可
+// 这一层是有锁的
 type Indexer interface {
 	// Put 向索引中存储 key 对应的数值位置信息
 	Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos

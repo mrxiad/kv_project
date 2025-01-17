@@ -21,6 +21,7 @@ const (
 )
 
 // DataFile 数据文件
+// 这一层是无锁的，需要在上层加锁
 type DataFile struct {
 	FileId    uint32        // 文件id
 	WriteOff  int64         // 文件写到了哪个位置

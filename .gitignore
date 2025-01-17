@@ -1,2 +1,5 @@
 ./tmp
 ./.idea
+*.data
+flock
+seq-no

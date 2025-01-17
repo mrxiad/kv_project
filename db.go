@@ -7,7 +7,6 @@ import (
 	"bitcask-go/utils"
 	"errors"
 	"fmt"
-	"github.com/gofrs/flock"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/gofrs/flock"
 )
 
 const (
@@ -29,7 +30,7 @@ type DB struct {
 	fileIds         []int                     // 文件 id，只能在加载索引的时候使用，不能在其他的地方更新使用
 	activeFile      *data.DataFile            // 当前活跃数据文件，可用于写入
 	olderFiles      map[uint32]*data.DataFile // 旧的数据文件，只能用于读
-	index           index.Indexer             // 内存索引
+	index           index.Indexer             // 内存索引(内部有锁)
 	seqNo           uint64                    // 事务序列号，全局递增
 	isMerging       bool                      // 是否正在 merge
 	seqNoFileExists bool                      // 存储事务序列号的文件是否存在
