@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"unsafe"
 )
 
 // DirSize 获取一个目录的大小
@@ -24,32 +23,30 @@ func DirSize(dirPath string) (int64, error) {
 	return size, err
 }
 
-// AvailableDiskSize 获取磁盘剩余可以空间大小
+// AvailableDiskSize 获取当前工作目录所在挂载点的剩余可用空间大小（字节）
 func AvailableDiskSize() (uint64, error) {
 	// 获取当前工作目录
 	wd, err := os.Getwd()
 	if err != nil {
 		return 0, err
 	}
-	// 获取当前工作目录所在的根路径，例如 "C:\\"
-	rootPath := filepath.VolumeName(wd) + "\\"
 
-	rootPathPtr, err := syscall.UTF16PtrFromString(rootPath)
-	if err != nil {
+	// 获取当前工作目录对应的挂载点路径
+	// 简单处理：假设使用当前工作目录即可
+	// 如果需要更精确的挂载点，可以用 filepath.VolumeName 或其他方式来获取
+	rootPath := wd
+
+	var stat syscall.Statfs_t
+	// 调用 Statfs 来获取文件系统统计信息
+	if err := syscall.Statfs(rootPath, &stat); err != nil {
 		return 0, err
 	}
-	var freeBytesAvailable, totalNumberOfBytes, totalNumberOfFreeBytes uint64
-	// 使用 GetDiskFreeSpaceEx 获取磁盘空间信息
-	r, _, e := syscall.NewLazyDLL("kernel32.dll").NewProc("GetDiskFreeSpaceExW").Call(
-		uintptr(unsafe.Pointer(rootPathPtr)),
-		uintptr(unsafe.Pointer(&freeBytesAvailable)),
-		uintptr(unsafe.Pointer(&totalNumberOfBytes)),
-		uintptr(unsafe.Pointer(&totalNumberOfFreeBytes)),
-	)
-	if r == 0 {
-		return 0, e
-	}
-	return freeBytesAvailable, nil
+
+	// 计算可用空间
+	// 注意：stat.Bavail 表示非特权用户可用块数，
+	// stat.Bsize 表示每个块的大小
+	available := stat.Bavail * uint64(stat.Bsize)
+	return available, nil
 }
 
 // CopyDir 拷贝数据目录

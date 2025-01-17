@@ -3,14 +3,15 @@ package main
 import (
 	bitcask "bitcask-go"
 	bitcask_redis "bitcask-go/redis"
-	"github.com/tidwall/redcon"
 	"log"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/tidwall/redcon"
 )
 
-const addr = "127.0.0.1:6379"
+const addr = "127.0.0.1:6380"
 
 // redis-server
 type BitcaskServer struct {
