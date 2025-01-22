@@ -8,9 +8,9 @@ import (
 type LogRecordType = byte
 
 const (
-	LogRecordNormal LogRecordType = iota
-	LogRecordDeleted
-	LogRecordTxnFinished
+	LogRecordNormal      LogRecordType = iota //常规写入
+	LogRecordDeleted                          //删除
+	LogRecordTxnFinished                      //事务结束(如果是单语句,也用这个,因为单独语句也是事务)
 )
 
 // crc type keySize valueSize

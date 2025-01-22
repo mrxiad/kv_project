@@ -51,9 +51,11 @@ func (it *Iterator) Key() []byte {
 // Value 当前遍历位置的 Value 数据
 func (it *Iterator) Value() ([]byte, error) {
 	logRecordPos := it.indexIter.Value()
-	it.db.mu.RLock()
-	defer it.db.mu.RUnlock()
-	return it.db.getValueByPosition(logRecordPos)
+	key := it.Key()
+	slot := it.db.hash(key)
+	it.db.mus[slot].RLock()
+	defer it.db.mus[slot].RUnlock()
+	return it.db.getValueByPosition(slot, logRecordPos)
 }
 
 // Close 关闭迭代器，释放相应资源

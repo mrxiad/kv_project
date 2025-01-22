@@ -3,6 +3,7 @@ package bitcask_go
 import (
 	"bitcask-go/data"
 	"encoding/binary"
+	"sort"
 	"sync"
 	"sync/atomic"
 )
@@ -84,9 +85,31 @@ func (wb *WriteBatch) Commit() error {
 		return ErrExceedMaxBatchNum
 	}
 
+	slotsIdMap := make(map[uint32]struct{})
+	for key := range wb.pendingWrites {
+		slot := wb.db.hash([]byte(key))
+		slotsIdMap[slot] = struct{}{}
+	}
+
+	//sort
+	slots := make([]uint32, 0, len(slotsIdMap))
+	for slot := range slotsIdMap {
+		slots = append(slots, slot)
+	}
+	sort.Slice(slots, func(i, j int) bool {
+		return slots[i] < slots[j]
+	})
+
 	// 加锁保证事务提交的串行化
-	wb.db.mu.Lock()
-	defer wb.db.mu.Unlock()
+	for _, slot := range slots {
+		wb.db.mus[slot].Lock()
+	}
+	// 倒着释放锁
+	defer func() {
+		for i := len(slots) - 1; i >= 0; i-- {
+			wb.db.mus[slots[i]].Unlock()
+		}
+	}()
 
 	// 获取当前最新的事务序列号
 	seqNo := atomic.AddUint64(&wb.db.seqNo, 1)
@@ -95,7 +118,8 @@ func (wb *WriteBatch) Commit() error {
 
 	// 开始去写数据
 	for _, record := range wb.pendingWrites {
-		logRecordPos, err := wb.db.appendLogRecord(&data.LogRecord{
+		slot := wb.db.hash(record.Key)
+		logRecordPos, err := wb.db.appendLogRecord(slot, &data.LogRecord{
 			Key:   logRecordKeyWithSeq(record.Key, seqNo),
 			Value: record.Value,
 			Type:  record.Type,
@@ -106,19 +130,36 @@ func (wb *WriteBatch) Commit() error {
 		positions[string(record.Key)] = logRecordPos
 	}
 
-	// 写一条标识事务完成的数据
+	// 写一条标识事务完成的数据,并且记录Num
+	num := make([]byte, 8)
+	binary.BigEndian.PutUint64(num, uint64(len(wb.pendingWrites)))
+
 	finishedRecord := &data.LogRecord{
-		Key:  logRecordKeyWithSeq(txnFinKey, seqNo),
-		Type: data.LogRecordTxnFinished,
+		Key:   txnFinKey,
+		Value: num,
+		Type:  data.LogRecordTxnFinished,
 	}
-	if _, err := wb.db.appendLogRecord(finishedRecord); err != nil {
+
+	//找到最大fileId,写入事务完成的记录
+	var maxFileId uint32 = 0
+	var slotToWrite uint32
+	for _, slot := range slots {
+		if wb.db.activeFiles[slot].FileId > maxFileId {
+			maxFileId = wb.db.activeFiles[slot].FileId
+			slotToWrite = slot
+		}
+	}
+
+	if _, err := wb.db.appendLogRecord(slotToWrite, finishedRecord); err != nil {
 		return err
 	} //添加一条记录标识事务完成
 
 	// 根据配置去进行持久化
-	if wb.options.SyncWrites && wb.db.activeFile != nil {
-		if err := wb.db.activeFile.Sync(); err != nil {
-			return err
+	if wb.options.SyncWrites {
+		for _, slot := range slots {
+			if err := wb.db.activeFiles[slot].Sync(); err != nil {
+				return err
+			}
 		}
 	}
 

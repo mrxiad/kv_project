@@ -15,29 +15,31 @@ const (
 	mergeFinishedKye = "merge.finished"
 )
 
-// Merge 清理无效数据、生成 Hint 文件，merge操作是阻塞主协程，可以改成异步，但是事务id没法处理
+// Merge 清理无效数据、生成 Hint 文件，merge操作是不阻塞主协程
 func (db *DB) Merge() error {
-	// 如果数据库为空， 则直接返回
-	if db.activeFile == nil {
-		return nil
+	for slot := range db.mus {
+		db.mus[slot].RLock()
 	}
-	db.mu.Lock()
+	unlockAllFn := func() {
+		for i := 0; i < len(db.mus); i++ {
+			db.mus[i].RUnlock()
+		}
+	}
 	// 如果 merge 正在进行中，则直接返回
 	if db.isMerging {
-		db.mu.Unlock()
 		return ErrMergeIsProgress
 	}
 
 	// 查看可以 merge 的数据量是否达到了阈值
 	totalSize, err := utils.DirSize(db.options.DirPath)
 	if err != nil {
-		db.mu.Unlock()
+		unlockAllFn()
 		return err
 	}
 
 	//如果无效数据比总数据量不超过阈值
 	if float32(db.reclaimSize)/float32(totalSize) < db.options.DataFileMergeRatio {
-		db.mu.Unlock()
+		unlockAllFn()
 		return ErrMergeRatioUnreached
 	}
 
@@ -49,42 +51,43 @@ func (db *DB) Merge() error {
 	// 查看剩余空间容量是否可以容乃 merge 之后的数据量
 	availableDiskSize, err := utils.AvailableDiskSize()
 	if err != nil {
-		db.mu.Unlock()
+		unlockAllFn()
 		return err
 	}
+
 	if uint64(totalSize-db.reclaimSize) >= availableDiskSize {
-		db.mu.Unlock()
+		unlockAllFn()
 		return ErrNoEnoughSpaceForMerge
 	}
 
-	// 持久化当前活跃文件
-	if err := db.activeFile.Sync(); err != nil {
-		db.mu.Unlock()
-		return err
+	for slot := range db.activeFiles {
+		if db.activeFiles[slot] == nil {
+			continue
+		}
+		if err := db.activeFiles[slot].Sync(); err != nil {
+			unlockAllFn()
+			return err
+		}
+		// 将当前活跃数据文件转换为旧的数据文件
+		db.olderFiles[db.activeFiles[slot].FileId] = db.activeFiles[slot]
 	}
-	// 将当前活跃数据文件转换为旧的数据文件
-	db.olderFiles[db.activeFile.FileId] = db.activeFile
-
-	// 打开一个新的活跃文件，用于写入数据，此时新的数据不会被merge
-	if err := db.setActiveDataFile(); err != nil {
-		db.mu.Unlock()
-		return nil
-	}
-
-	// 记录最近没有参与 merge 的文件 id
-	nonMergeFileId := db.activeFile.FileId //这个id不用参与merge，因为是新的id
 
 	// 取出所有需要 merge 的文件
 	var mergeFiles []*data.DataFile
 	for _, file := range db.olderFiles {
 		mergeFiles = append(mergeFiles, file)
 	}
-	db.mu.Unlock() //解锁，此后可以进行写入
-
+	unlockAllFn() //解锁，此后可以进行写入
+	if len(mergeFiles) == 0 {
+		return nil
+	}
 	// 待 merge 的文件 从小大大排序，依次 merge
 	sort.Slice(mergeFiles, func(i, j int) bool {
 		return mergeFiles[i].FileId < mergeFiles[j].FileId
 	})
+
+	// 记录不需要参与Merge的最小文件Id
+	nonMergeFileId := mergeFiles[len(mergeFiles)-1].FileId + 1
 
 	mergePath := db.getMergePath() // 获取 merge 目录
 	// 如果目录存在，说明发生过 merge 将其删除掉
@@ -128,13 +131,14 @@ func (db *DB) Merge() error {
 			realKey, _ := parseLogRecordKey(logRecord.Key)
 			logRecordPos := db.index.Get(realKey) // 获取pos
 			// 和内存中的索引位置进行比较。如果有效则重新写入到新的数据文件中(由于事务更新是先写入到日志，再更新内存，即使挂了也没事
-			// 因为内存没有写入，所以下面的代码是不会执行的
+			// 如果内存没有写入这条key，所以下面的代码是不会执行的
 			if logRecordPos != nil &&
 				logRecordPos.Fid == dataFile.FileId &&
 				logRecordPos.Offset == offset {
 				// 不需要使用事务序列号 清除事务标记
 				logRecord.Key = logRecordKeyWithSeq(realKey, nonTransactionSeqNo)
-				pos, err := mergeDB.appendLogRecord(logRecord) //mergeDB追加一条记录
+				logRecord.Type = data.LogRecordTxnFinished        //事务结束标志
+				pos, err := mergeDB.appendLogRecord(0, logRecord) //mergeDB追加一条记录,只追加到第一个就可以
 				if err != nil {
 					return err
 				}
@@ -151,9 +155,9 @@ func (db *DB) Merge() error {
 	if err := hintFile.Sync(); err != nil {
 		return err
 	} //只有这一个文件
-	if err := mergeDB.Sync(); err != nil {
+	if err := mergeDB.activeFiles[0].Sync(); err != nil {
 		return err
-	} //有很多文件
+	}
 	// 写标识 merge 完成的文件
 	mergeFinishedFile, err := data.OpenMergeFinishedFile(mergePath)
 	if err != nil {
@@ -229,6 +233,7 @@ func (db *DB) loadMergeFiles() error {
 		return nil
 	}
 
+	// 获取到下一个文件ID,因为文件是顺序编号的
 	nonMergeFileId, err := db.getNonMergeFileId(mergePath)
 	if err != nil {
 		return err
@@ -256,12 +261,14 @@ func (db *DB) loadMergeFiles() error {
 	return nil
 }
 
-// 获取 merge 完成的文件 id
+// 获取 merge 完成的文件id的下一个
 func (db *DB) getNonMergeFileId(dirPath string) (uint32, error) {
+	// 打开 merge 完成文件
 	mergeFinishedFile, err := data.OpenMergeFinishedFile(dirPath)
 	if err != nil {
 		return 0, err
 	}
+	// 读取 merge 完成文件中的记录
 	record, _, err := mergeFinishedFile.ReadLogRecord(0)
 	if err != nil {
 		return 0, err

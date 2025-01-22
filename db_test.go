@@ -2,16 +2,17 @@ package bitcask_go
 
 import (
 	"bitcask-go/utils"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // 测试完成之后销毁 DB 数据目录
 func destroyDB(db *DB) {
 	_ = db.Close()
-	//_ = os.RemoveAll(db.options.DirPath)
+	_ = os.RemoveAll(db.options.DirPath)
 }
 
 func TestOpen(t *testing.T) {
@@ -33,19 +34,23 @@ func TestDB_Put(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, db)
 
+	val1 := utils.RandomValue(24)
 	// 1.正常 Put 一条数据
-	err = db.Put(utils.GetTestKey(1), utils.RandomValue(24))
+	err = db.Put(utils.GetTestKey(1), val1)
 	assert.Nil(t, err)
-	val1, err := db.Get(utils.GetTestKey(1))
+	val1s, err := db.Get(utils.GetTestKey(1))
 	assert.Nil(t, err)
-	assert.NotNil(t, val1)
+	assert.NotNil(t, val1s)
+	assert.Equal(t, val1, val1s)
 
 	// 2.重复 Put key 相同的数据
-	err = db.Put(utils.GetTestKey(1), utils.RandomValue(24))
+	val2 := utils.RandomValue(24)
+	err = db.Put(utils.GetTestKey(1), val2)
 	assert.Nil(t, err)
-	val2, err := db.Get(utils.GetTestKey(1))
+	val2s, err := db.Get(utils.GetTestKey(1))
 	assert.Nil(t, err)
-	assert.NotNil(t, val2)
+	assert.NotNil(t, val2s)
+	assert.Equal(t, val2, val2s)
 
 	// 3.key 为空
 	err = db.Put(nil, utils.RandomValue(24))
@@ -63,7 +68,6 @@ func TestDB_Put(t *testing.T) {
 		err := db.Put(utils.GetTestKey(i), utils.RandomValue(128))
 		assert.Nil(t, err)
 	}
-	assert.Equal(t, 2, len(db.olderFiles))
 
 	// 6.重启后再 Put 数据
 	err = db.Close()
@@ -109,6 +113,7 @@ func TestDB_Get(t *testing.T) {
 	err = db.Put(utils.GetTestKey(22), utils.RandomValue(24))
 	assert.Nil(t, err)
 	err = db.Put(utils.GetTestKey(22), utils.RandomValue(24))
+	assert.Nil(t, err)
 	val3, err := db.Get(utils.GetTestKey(22))
 	assert.Nil(t, err)
 	assert.NotNil(t, val3)
@@ -127,7 +132,7 @@ func TestDB_Get(t *testing.T) {
 		err := db.Put(utils.GetTestKey(i), utils.RandomValue(128))
 		assert.Nil(t, err)
 	}
-	assert.Equal(t, 2, len(db.olderFiles))
+
 	val5, err := db.Get(utils.GetTestKey(101))
 	assert.Nil(t, err)
 	assert.NotNil(t, val5)
@@ -138,6 +143,7 @@ func TestDB_Get(t *testing.T) {
 
 	// 重启数据库
 	db2, err := Open(opts)
+	assert.Nil(t, err)
 	val6, err := db2.Get(utils.GetTestKey(11))
 	assert.Nil(t, err)
 	assert.NotNil(t, val6)
@@ -199,6 +205,7 @@ func TestDB_Delete(t *testing.T) {
 
 	// 重启数据库
 	db2, err := Open(opts)
+	assert.Nil(t, err)
 	_, err = db2.Get(utils.GetTestKey(11))
 	assert.Equal(t, ErrKeyNotFound, err)
 
@@ -271,8 +278,7 @@ func TestDB_Fold(t *testing.T) {
 	err = db.Put([]byte("Expert"), utils.RandomValue(10))
 	assert.Nil(t, err)
 
-	var check func([]byte, []byte) bool
-	check = func(key []byte, value []byte) bool {
+	check := func(key []byte, value []byte) bool {
 		assert.NotNil(t, key)
 		assert.NotNil(t, value)
 		return true
@@ -309,7 +315,7 @@ func TestDB_Sync(t *testing.T) {
 	err = db.Put([]byte("Alex"), utils.RandomValue(10))
 	assert.Nil(t, err)
 
-	err = db.Sync()
+	err = db.SyncAll()
 	assert.Nil(t, err)
 }
 

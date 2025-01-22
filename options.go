@@ -21,6 +21,9 @@ type Options struct {
 
 	// 数据文件合并的阈值
 	DataFileMergeRatio float32
+
+	//hash槽的数量
+	Slots int64
 }
 
 // IteratorOptions 索引迭代器配置项
@@ -62,6 +65,7 @@ var DefaultOptions = Options{
 	IndexType:          ART,
 	MMapAtStartup:      true,
 	DataFileMergeRatio: 0.5,
+	Slots:              4,
 }
 
 var DefaultIteratorOptions = IteratorOptions{
